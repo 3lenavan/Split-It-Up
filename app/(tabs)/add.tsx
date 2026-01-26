@@ -1,112 +1,261 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+/******************************************************************************
+ * Add Screen Component
+ *
+ * Where users can create a new split by entering details.
+ *
+ * TO::DO - Integrate with backend to save new splits and manage participants.
+ *******************************************************************************/
 
-import { Collapsible } from '@/components/ui/collapsible';
-import { ExternalLink } from '@/components/external-link';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { IconSymbol } from '@/components/ui/icon-symbol';
-import { Fonts } from '@/constants/theme';
+import { Percent, Plus, X } from "lucide-react-native";
+import {
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
+// Api that ensures content is within safe area boundaries
+import { SafeAreaView } from "react-native-safe-area-context";
 
-export default function TabTwoScreen() {
+export default function AddScreen() {
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#D0D0D0', dark: '#353636' }}
-      headerImage={
-        <IconSymbol
-          size={310}
-          color="#808080"
-          name="chevron.left.forwardslash.chevron.right"
-          style={styles.headerImage}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText
-          type="title"
-          style={{
-            fontFamily: Fonts.rounded,
-          }}>
-          Explore
-        </ThemedText>
-      </ThemedView>
-      <ThemedText>This app includes example code to help you get started.</ThemedText>
-      <Collapsible title="File-based routing">
-        <ThemedText>
-          This app has two screens:{' '}
-          <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> and{' '}
-          <ThemedText type="defaultSemiBold">app/(tabs)/explore.tsx</ThemedText>
-        </ThemedText>
-        <ThemedText>
-          The layout file in <ThemedText type="defaultSemiBold">app/(tabs)/_layout.tsx</ThemedText>{' '}
-          sets up the tab navigator.
-        </ThemedText>
-        <ExternalLink href="https://docs.expo.dev/router/introduction">
-          <ThemedText type="link">Learn more</ThemedText>
-        </ExternalLink>
-      </Collapsible>
-      <Collapsible title="Android, iOS, and web support">
-        <ThemedText>
-          You can open this project on Android, iOS, and the web. To open the web version, press{' '}
-          <ThemedText type="defaultSemiBold">w</ThemedText> in the terminal running this project.
-        </ThemedText>
-      </Collapsible>
-      <Collapsible title="Images">
-        <ThemedText>
-          For static images, you can use the <ThemedText type="defaultSemiBold">@2x</ThemedText> and{' '}
-          <ThemedText type="defaultSemiBold">@3x</ThemedText> suffixes to provide files for
-          different screen densities
-        </ThemedText>
-        <Image
-          source={require('@/assets/images/react-logo.png')}
-          style={{ width: 100, height: 100, alignSelf: 'center' }}
-        />
-        <ExternalLink href="https://reactnative.dev/docs/images">
-          <ThemedText type="link">Learn more</ThemedText>
-        </ExternalLink>
-      </Collapsible>
-      <Collapsible title="Light and dark mode components">
-        <ThemedText>
-          This template has light and dark mode support. The{' '}
-          <ThemedText type="defaultSemiBold">useColorScheme()</ThemedText> hook lets you inspect
-          what the user&apos;s current color scheme is, and so you can adjust UI colors accordingly.
-        </ThemedText>
-        <ExternalLink href="https://docs.expo.dev/develop/user-interface/color-themes/">
-          <ThemedText type="link">Learn more</ThemedText>
-        </ExternalLink>
-      </Collapsible>
-      <Collapsible title="Animations">
-        <ThemedText>
-          This template includes an example of an animated component. The{' '}
-          <ThemedText type="defaultSemiBold">components/HelloWave.tsx</ThemedText> component uses
-          the powerful{' '}
-          <ThemedText type="defaultSemiBold" style={{ fontFamily: Fonts.mono }}>
-            react-native-reanimated
-          </ThemedText>{' '}
-          library to create a waving hand animation.
-        </ThemedText>
-        {Platform.select({
-          ios: (
-            <ThemedText>
-              The <ThemedText type="defaultSemiBold">components/ParallaxScrollView.tsx</ThemedText>{' '}
-              component provides a parallax effect for the header image.
-            </ThemedText>
-          ),
-        })}
-      </Collapsible>
-    </ParallaxScrollView>
+    <SafeAreaView style={styles.safeArea}>
+      <ScrollView contentContainerStyle={styles.container}>
+        {/* Title */}
+        <Text style={styles.title}>Create New Split</Text>
+
+        {/* Occasion Name */}
+        <View style={styles.section}>
+          <Text style={styles.label}>Occasion Name</Text>
+          <TextInput
+            placeholder="e.g. Vegas Trip, Dinner"
+            style={styles.input}
+          />
+        </View>
+
+        {/* Total Amount */}
+        <View style={styles.section}>
+          <Text style={styles.label}>Total Amount</Text>
+          <View style={styles.amountContainer}>
+            <Text style={styles.amountDollar}>$</Text>
+            <TextInput
+              placeholder="0.00"
+              keyboardType="numeric"
+              style={styles.amountInput}
+            />
+          </View>
+        </View>
+
+        {/* Split With Friends */}
+        <View style={styles.section}>
+          <View style={styles.splitHeader}>
+            <Text style={styles.label}>Split With Friends</Text>
+            <View style={styles.splitEvenly}>
+              <Percent size={14} color="#8b16a3ff" />
+              <Text style={styles.splitText}>Split Evenly</Text>
+            </View>
+          </View>
+
+          {/* Friend Card (static) */}
+          <View style={styles.friendCard}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.friendName}>Audrey Saidel</Text>
+              <Text style={styles.friendHandle}>@audrey_s</Text>
+            </View>
+
+            <View style={styles.friendSplit}>
+              <View style={styles.percentageBox}>
+                <Text style={styles.percentageText}>50</Text>
+              </View>
+              <Text style={styles.percentageSign}>%</Text>
+              <Text style={styles.amountText}>$45.00</Text>
+            </View>
+
+            <Pressable style={{ marginLeft: 8 }}>
+              <X size={20} color="#9ca3af" />
+            </Pressable>
+          </View>
+        </View>
+
+        {/* Progress Bar */}
+        <View style={styles.section}>
+          <View style={styles.progressHeader}>
+            <Text style={styles.label}>Total</Text>
+            <Text style={styles.progressText}>100%</Text>
+          </View>
+          <View style={styles.progressBar}>
+            <View style={styles.progressFill} />
+          </View>
+        </View>
+
+        {/* Add Friend Button */}
+        <Pressable style={styles.addFriendButton}>
+          <Plus size={16} color="#6b7280" />
+          <Text style={styles.addFriendText}>Add Friend</Text>
+        </Pressable>
+
+        {/* Create Button */}
+        <Pressable style={styles.createButton}>
+          <Text style={styles.createButtonText}>Create Split</Text>
+        </Pressable>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
+// Styles for Add Screen
 const styles = StyleSheet.create({
-  headerImage: {
-    color: '#808080',
-    bottom: -90,
-    left: -35,
-    position: 'absolute',
+  safeArea: {
+    flex: 1,
+    backgroundColor: "#fff",
   },
-  titleContainer: {
-    flexDirection: 'row',
-    gap: 8,
+  container: {
+    paddingHorizontal: 16,
+    paddingTop: 24,
+    paddingBottom: 40, // give bottom space for scrolling
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: "600",
+    marginBottom: 24,
+  },
+  section: {
+    marginBottom: 24,
+  },
+  label: {
+    fontSize: 14,
+    color: "#4b5563",
+    marginBottom: 8,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: "#d1d5db",
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 14,
+  },
+  amountContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#d1d5db",
+    borderRadius: 8,
+    paddingHorizontal: 12,
+  },
+  amountDollar: {
+    color: "#6b7280",
+    marginRight: 4,
+    fontSize: 14,
+  },
+  amountInput: {
+    flex: 1,
+    paddingVertical: 12,
+    fontSize: 14,
+  },
+  splitHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 8,
+  },
+  splitEvenly: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  splitText: {
+    color: "#8b16a3ff",
+    fontSize: 12,
+  },
+  friendCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 8,
+  },
+  friendName: {
+    fontWeight: "500",
+  },
+  friendHandle: {
+    fontSize: 12,
+    color: "#6b7280",
+  },
+  friendSplit: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  percentageBox: {
+    borderWidth: 1,
+    borderColor: "#d1d5db",
+    borderRadius: 4,
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+    width: 40,
+  },
+  percentageText: {
+    textAlign: "right",
+    fontSize: 12,
+  },
+  percentageSign: {
+    fontSize: 12,
+    color: "#6b7280",
+    marginLeft: 2,
+  },
+  amountText: {
+    width: 60,
+    textAlign: "right",
+    fontWeight: "500",
+  },
+  progressHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 4,
+  },
+  progressText: {
+    fontWeight: "600",
+    color: "#16a34a",
+  },
+  progressBar: {
+    height: 8,
+    backgroundColor: "#e5e7eb",
+    borderRadius: 4,
+    overflow: "hidden",
+  },
+  progressFill: {
+    height: "100%",
+    width: "100%",
+    backgroundColor: "#16a34a",
+  },
+  addFriendButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: "#d1d5db",
+    borderStyle: "dashed",
+    borderRadius: 8,
+    paddingVertical: 12,
+    marginBottom: 24,
+    gap: 4,
+  },
+  addFriendText: {
+    color: "#4b5563",
+    fontSize: 14,
+  },
+  createButton: {
+    backgroundColor: "#8b16a3ff",
+    paddingVertical: 16,
+    borderRadius: 8,
+  },
+  createButtonText: {
+    color: "#fff",
+    textAlign: "center",
+    fontWeight: "600",
+    fontSize: 16,
   },
 });
