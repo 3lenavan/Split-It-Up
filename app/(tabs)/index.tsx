@@ -11,9 +11,14 @@ import { useEffect, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 export default function HomeScreen() {
-  // Splits state to hold the list of splits fetched from the backend, and loading state to manage loading indicator
-  // setSplits is used to update the splits state after fetching data from the backend, and setLoading is used to toggle the loading state while data is being fetched.
-  const [splits, setSplits] = useState<any[]>([]);
+  // Define the Split type to match the structure of the splits data from the backend
+  type Split = {
+    id: string;
+    title: string;
+    total_amount: number;
+    created_at: string;
+  };
+  const [splits, setSplits] = useState<Split[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -46,12 +51,9 @@ export default function HomeScreen() {
         setLoading(false);
         return;
       } else {
-        // .map is used to iterate over the data array and extract the splits from each item, creating a new CLEAN array of splits that is then set in state.
-        // This allows the component to render the list of splits for the user.
-        const formatted = data.map((item: any) => item.splits);
+        const formatted: Split[] = data?.flatMap((item) => item.splits) ?? [];
         setSplits(formatted); // replace splits state with the formatted splits data from the backend
       }
-      setSplits(data);
       setLoading(false);
     };
     loadSplits();
