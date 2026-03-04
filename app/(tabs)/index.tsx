@@ -6,19 +6,63 @@
  * TO::DO - Integrate with backend to fetch real splits data and display them.
  *******************************************************************************/
 
-import { ScrollView, StyleSheet, Text, View } from "react-native";
+import { supabase } from "@/lib/supabaseClient";
+import { useEffect, useState } from "react";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 export default function HomeScreen() {
-  // Leave splits empty because no data management is set up yet
-  const splits: any[] = [];
+  // Splits state to hold the list of splits fetched from the backend, and loading state to manage loading indicator
+  // setSplits is used to update the splits state after fetching data from the backend, and setLoading is used to toggle the loading state while data is being fetched.
+  const [splits, setSplits] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
+  useEffect(() => {
+    /****
+     * Name: loadSplits
+     * Description: Fetches splits data for the authenticated user
+     * from Supabase and sets it in state.
+     */
+    const loadSplits = async () => {
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
+      if (authError || !user) {
+        // if theres an authentication error or not a user
+        console.error("Error fetching user:", authError);
+        setLoading(false);
+        return;
+      }
+      // query supabase for splits that the user is a member of, and get the split details
+      // store in data variable. The query uses a join to get the split details from the splits table based on the split_id in the split_members table, and filters by the current user's profile_id.
+      const { data, error } = await supabase
+        .from("split_members")
+        .select(`split_id, splits(id, title, total_amount, created_at)`)
+        .eq("profile_id", user.id);
+
+      // if theres an error fetching the splits, log it. Otherwise, format the data to extract the splits and set it in state
+      if (error) {
+        console.error("Error fetching splits:", error);
+        setLoading(false);
+        return;
+      } else {
+        // .map is used to iterate over the data array and extract the splits from each item, creating a new CLEAN array of splits that is then set in state.
+        // This allows the component to render the list of splits for the user.
+        const formatted = data.map((item: any) => item.splits);
+        setSplits(formatted); // replace splits state with the formatted splits data from the backend
+      }
+      setSplits(data);
+      setLoading(false);
+    };
+    loadSplits();
+  }, []);
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.container}>
         <Text style={styles.title}>Your Splits</Text>
 
         {/* Placeholder when no splits exist */}
-        {splits.length === 0 && (
+        {!loading && splits.length === 0 && (
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyText}>
               No splits yet. Tap the + button to create one!
@@ -26,41 +70,28 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {/* Example of a split card (uncomment for test split)   
-          <View style={styles.cardHeader}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.cardTitle}>Vegas Trip</Text>
-              <Text style={styles.cardDate}>Jan 10, 2026</Text>
+        {/*Render splits from state. Currently just shows title, date, 
+        and total amount owed for each split. Can be expanded to show more details and actions.*/}
+        {splits.map((split) => (
+          <Pressable key={split.id} style={styles.card}>
+            <View style={styles.cardHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.cardTitle}>{split.title}</Text>
+                <Text style={styles.cardDate}>
+                  {new Date(split.created_at).toLocaleDateString()}
+                </Text>
+              </View>
             </View>
-            <ChevronRight size={20} color="#9ca3af" />
-          </View>
-
-          <View style={styles.cardBalances}>
-            <View style={styles.balanceBlock}>
-              <Text style={styles.balanceLabel}>You're owed</Text>
-              <Text style={[styles.balanceValue, { color: '#16a34a' }]}>+$300.00</Text>
+            <View style={styles.cardBalances}>
+              <View style={styles.balanceBlock}>
+                <Text style={styles.balanceLabel}>Total Owed</Text>
+                <Text style={styles.balanceValue}>
+                  ${Number(split.total_amount).toFixed(2)}
+                </Text>
+              </View>
             </View>
-            <View style={styles.balanceBlock}>
-              <Text style={styles.balanceLabel}>You owe</Text>
-              <Text style={[styles.balanceValue, { color: '#dc2626' }]}>-$100.00</Text>
-            </View>
-            <View style={styles.balanceBlock}>
-              <Text style={styles.balanceLabel}>Total</Text>
-              <Text style={styles.balanceValue}>$1200.00</Text>
-            </View>
-          </View>
-
-          <View style={styles.cardFriends}>
-            <Text style={styles.friendsLabel}>3 friends</Text>
-            <View style={styles.friendList}>
-              <View style={styles.friendBadge}><Text style={styles.friendText}>Sarah</Text></View>
-              <View style={styles.friendBadge}><Text style={styles.friendText}>Mike</Text></View>
-              <View style={styles.friendBadge}><Text style={styles.friendText}>Jessica</Text></View>
-              <View style={styles.friendBadgeExtra}><Text style={styles.friendText}>+1 more</Text></View>
-            </View>
-          </View>
-        </Pressable>
-        */}
+          </Pressable>
+        ))}
       </ScrollView>
     </SafeAreaView>
   );
