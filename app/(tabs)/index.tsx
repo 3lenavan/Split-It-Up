@@ -29,10 +29,17 @@ export default function HomeScreen() {
      */
     const loadSplits = async () => {
       const {
-        data: { user },
+        data: { session },
         error: authError,
-      } = await supabase.auth.getUser();
-      if (authError || !user) {
+      } = await supabase.auth.getSession();
+      const user = session?.user;
+
+      if (!user) {
+        console.log("No user session yet");
+        setLoading(false);
+        return;
+      }
+      if (authError) {
         // if theres an authentication error or not a user
         console.error("Error fetching user:", authError);
         setLoading(false);
@@ -44,7 +51,8 @@ export default function HomeScreen() {
         .from("split_members")
         .select(`split_id, splits(id, title, total_amount, created_at)`)
         .eq("profile_id", user.id);
-
+      console.log("SPLITS DATA:", data);
+      console.log("SESSION USER:", user?.id);
       // if theres an error fetching the splits, log it. Otherwise, format the data to extract the splits and set it in state
       if (error) {
         console.error("Error fetching splits:", error);
