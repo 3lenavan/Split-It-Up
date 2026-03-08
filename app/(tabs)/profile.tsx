@@ -10,30 +10,154 @@
  *****************************************************************************/
 
 import { Check, Search, UserPlus } from "lucide-react-native";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { useEffect, useState } from "react";
+import { supabase } from "@/lib/supabaseClient";
 // Api that ensures content is within safe area boundaries
 import { SafeAreaView } from "react-native-safe-area-context";
 
+
 // Profile Screen Component
 export default function ProfileScreen() {
+
+  const [searchText, setSearchText] = useState("");
+  
+  const [profile, setProfile] = useState({
+  name: "",
+  username: "",
+  email: "",
+});
+
+    const [friends] = useState([
+    {
+      id: "1",
+      name: "Audrey Saidel",
+      username: "audrey_s",
+    },
+  ]);
+
+  const [pendingRequests] = useState([
+    {
+      id: "1",
+      name: "Raner Chow",
+      username: "raner_c",
+    },
+  ]);
+
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+
+  useEffect(() => {
+  const loadProfile = async () => {
+    const {
+      data: { session },
+      error: sessionError,
+    } = await supabase.auth.getSession();
+
+    const user = session?.user;
+
+    if (!user) {
+      console.log("No user session found");
+      return;
+    }
+
+    if (sessionError) {
+      console.error("Error getting session:", sessionError);
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("full_name, username, email")
+      .eq("id", user.id)
+      .single();
+
+    if (error) {
+      console.error("Error loading profile:", error);
+      return;
+    }
+
+    if (data) {
+      setProfile({
+        name: data.full_name || "",
+        username: data.username || "",
+        email: data.email || "",
+      });
+    }
+  };
+
+  loadProfile();
+}, []);
+
+const handleSearch = async () => {
+  console.log("Search button pressed");
+
+  if (!searchText.trim()) {
+    console.log("Search text is empty");
+    return;
+  }
+
+  console.log("Searching for:", searchText);
+
+  const {
+    data: { session },
+    error: sessionError,
+  } = await supabase.auth.getSession();
+
+  if (sessionError) {
+    console.error("Session error:", sessionError);
+    return;
+  }
+
+  const currentUserId = session?.user?.id;
+  console.log("Current user id:", currentUserId);
+
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id, full_name, username")
+    .ilike("username", `%${searchText}%`);
+
+  if (error) {
+    console.error("Search error:", error);
+    return;
+  }
+
+  console.log("Raw search data:", data);
+
+  const formatted =
+    data
+      ?.filter((user) => user.id !== currentUserId)
+      .map((user) => ({
+        id: user.id,
+        name: user.full_name,
+        username: user.username,
+        mutualFriends: 0,
+      })) ?? [];
+
+  console.log("Formatted search results:", formatted);
+
+  setSearchResults(formatted);
+};
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.container}>
         {/* Profile Header */}
         <View style={styles.profileHeader}>
           <View style={styles.avatar}>
-            <Text style={styles.avatarText}>Y</Text>
+          <Text style={styles.avatarText}>
+    {profile.name ? profile.name.charAt(0).toUpperCase() : "?"}
+          </Text>
           </View>
           <View style={styles.profileInfo}>
-            <Text style={styles.name}>Your Name</Text>
-            <Text style={styles.username}>@your_username</Text>
-            <Text style={styles.email}>you@example.com</Text>
+            <Text style={styles.name}>{profile.name}</Text>
+            <Text style={styles.username}>@{profile.username}</Text>
+            <Text style={styles.email}>{profile.email}</Text>
           </View>
         </View>
 
         <View style={styles.stats}>
           <View style={styles.statBlock}>
-            <Text style={styles.statValue}>0</Text>
+            <Text style={styles.statValue}>{friends.length}</Text>
             <Text style={styles.statLabel}>Friends</Text>
           </View>
           <View style={styles.statBlock}>
@@ -51,69 +175,85 @@ export default function ProfileScreen() {
           <Text style={styles.sectionTitle}>Add New Friend</Text>
           <View style={styles.searchBox}>
             <Search size={18} color="#9ca3af" style={styles.searchIcon} />
-            <View style={styles.searchInputPlaceholder}>
-              <Text style={styles.searchPlaceholder}>Search by username</Text>
-            </View>
-            <Pressable style={styles.searchButton}>
+            <TextInput
+  style={styles.searchInput}
+  placeholder="Search by username"
+  placeholderTextColor="#9ca3af"
+  value={searchText}
+  onChangeText={setSearchText}
+/>
+            <Pressable style={styles.searchButton} onPress={handleSearch}>
               <Text style={styles.searchButtonText}>Search</Text>
             </Pressable>
           </View>
 
-          {/* Example Search Result */}
-          <View style={styles.resultCard}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.resultName}>Alex Kim</Text>
-              <Text style={styles.resultUsername}>@alex_k</Text>
-              <Text style={styles.resultMutual}>3 mutual friends</Text>
-            </View>
-            <Pressable style={styles.addButton}>
-              <UserPlus size={16} color="#fff" />
-              <Text style={styles.addButtonText}>Add</Text>
-            </Pressable>
-          </View>
+          {/* Search Results */}
+<Text>Results found: {searchResults.length}</Text>
+
+{searchResults.map((user) => (
+  <View key={user.id} style={styles.resultCard}>
+    <View style={{ flex: 1 }}>
+      <Text style={styles.resultName}>{user.name}</Text>
+      <Text style={styles.resultUsername}>@{user.username}</Text>
+      <Text style={styles.resultMutual}>
+        {user.mutualFriends} mutual friends
+      </Text>
+    </View>
+    <Pressable style={styles.addButton}>
+      <UserPlus size={16} color="#fff" />
+      <Text style={styles.addButtonText}>Add</Text>
+    </Pressable>
+  </View>
+))}
         </View>
 
         {/* Pending Requests */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Pending Requests</Text>
-          <View style={styles.pendingCard}>
-            <View>
-              <Text style={styles.resultName}>Raner Chow</Text>{" "}
-              {/* MOCK DATA */}
-              <Text style={styles.resultUsername}>@raner_c</Text>
-            </View>
-            <View style={styles.pendingBadge}>
-              <Text style={styles.pendingText}>Pending</Text>
-            </View>
-          </View>
+        {pendingRequests.map((request) => (
+  <View key={request.id} style={styles.pendingCard}>
+    <View>
+      <Text style={styles.resultName}>{request.name}</Text>
+      <Text style={styles.resultUsername}>@{request.username}</Text>
+    </View>
+    <View style={styles.pendingBadge}>
+      <Text style={styles.pendingText}>Pending</Text>
+    </View>
+  </View>
+))}
         </View>
 
         {/* Friends List */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Your Friends (0)</Text>
-          <View style={styles.friendCard}>
-            <View style={styles.friendInfo}>
-              <View style={styles.friendAvatar}>
-                <Text style={styles.friendAvatarText}>S</Text>
-              </View>
-              <View>
-                <Text style={styles.resultName}>Audrey Saidel</Text>{" "}
-                {/* MOCK DATA */}
-                <Text style={styles.resultUsername}>@audrey_s</Text>
-              </View>
-            </View>
-            <View style={styles.friendStatus}>
-              <Check size={16} color="#8b16a3ff" />
-              <Text style={styles.friendStatusText}>Friends</Text>
-            </View>
-          </View>
+          <Text style={styles.sectionTitle}>Your Friends ({friends.length})</Text>
+          {friends.map((friend) => (
+  <View key={friend.id} style={styles.friendCard}>
+    <View style={styles.friendInfo}>
+      <View style={styles.friendAvatar}>
+        <Text style={styles.friendAvatarText}>
+          {friend.name.charAt(0).toUpperCase()}
+        </Text>
+      </View>
+      <View>
+        <Text style={styles.resultName}>{friend.name}</Text>
+        <Text style={styles.resultUsername}>@{friend.username}</Text>
+      </View>
+    </View>
+    <View style={styles.friendStatus}>
+      <Check size={16} color="#8b16a3ff" />
+      <Text style={styles.friendStatusText}>Friends</Text>
+    </View>
+  </View>
+))}
 
           {/* Empty State */}
-          <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>
-              No friends yet. Search to add your first friend!
-            </Text>
-          </View>
+        {friends.length === 0 && (
+  <View style={styles.emptyContainer}>
+    <Text style={styles.emptyText}>
+      No friends yet. Search to add your first friend!
+    </Text>
+  </View>
+)}
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -168,6 +308,12 @@ const styles = StyleSheet.create({
   searchIcon: { marginLeft: 4 },
   searchInputPlaceholder: { flex: 1, marginLeft: 8 },
   searchPlaceholder: { color: "#9ca3af" },
+  searchInput: {
+  flex: 1,
+  marginLeft: 8,
+  fontSize: 14,
+  color: "#111827",
+},
   searchButton: {
     backgroundColor: "#8b16a3ff",
     borderRadius: 8,
