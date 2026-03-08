@@ -6,7 +6,7 @@
  * TO::DO - Integrate with backend to save new splits and manage participants.
  *******************************************************************************/
 
-import { Percent, Plus, X } from "lucide-react-native";
+import { Percent, Plus } from "lucide-react-native";
 import {
   Pressable,
   ScrollView,
@@ -16,9 +16,43 @@ import {
   View,
 } from "react-native";
 // Api that ensures content is within safe area boundaries
+import { createSplit } from "@/lib/split";
+import { useState } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function AddScreen() {
+  const [occasionName, setOccasionName] = useState("");
+  const [total, setTotal] = useState("");
+
+  async function handleCreateSplit() {
+    try {
+      if (!occasionName || !total) {
+        console.log("Missing data");
+        return;
+      }
+
+      const amount = parseFloat(total);
+
+      if (isNaN(amount)) {
+        console.log("Invalid amount");
+        return;
+      }
+      await createSplit({
+        title: occasionName,
+        totalAmount: Number(total),
+        members: [
+          {
+            profileId: user!.id,
+            sharePercentage: 100,
+            shareAmount: amount,
+          },
+        ],
+      });
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.container}>
@@ -31,6 +65,8 @@ export default function AddScreen() {
           <TextInput
             placeholder="e.g. Vegas Trip, Dinner"
             style={styles.input}
+            value={occasionName}
+            onChangeText={setOccasionName}
           />
         </View>
 
@@ -43,6 +79,8 @@ export default function AddScreen() {
               placeholder="0.00"
               keyboardType="numeric"
               style={styles.amountInput}
+              value={total}
+              onChangeText={setTotal}
             />
           </View>
         </View>
@@ -56,26 +94,7 @@ export default function AddScreen() {
               <Text style={styles.splitText}>Split Evenly</Text>
             </View>
           </View>
-
-          {/* Friend Card (static) */}
-          <View style={styles.friendCard}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.friendName}>Audrey Saidel</Text>
-              <Text style={styles.friendHandle}>@audrey_s</Text>
-            </View>
-
-            <View style={styles.friendSplit}>
-              <View style={styles.percentageBox}>
-                <Text style={styles.percentageText}>50</Text>
-              </View>
-              <Text style={styles.percentageSign}>%</Text>
-              <Text style={styles.amountText}>$45.00</Text>
-            </View>
-
-            <Pressable style={{ marginLeft: 8 }}>
-              <X size={20} color="#9ca3af" />
-            </Pressable>
-          </View>
+          {/* Friend Card TODO */}
         </View>
 
         {/* Progress Bar */}
@@ -96,7 +115,7 @@ export default function AddScreen() {
         </Pressable>
 
         {/* Create Button */}
-        <Pressable style={styles.createButton}>
+        <Pressable style={styles.createButton} onPress={handleCreateSplit}>
           <Text style={styles.createButtonText}>Create Split</Text>
         </Pressable>
       </ScrollView>
