@@ -5,6 +5,7 @@
  *
  * TO::DO - Integrate with backend to save new splits and manage participants.
  *******************************************************************************/
+import { supabase } from "@/lib/supabaseClient";
 
 import { Percent, Plus } from "lucide-react-native";
 import {
@@ -17,32 +18,54 @@ import {
 } from "react-native";
 // Api that ensures content is within safe area boundaries
 import { createSplit } from "@/lib/split";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function AddScreen() {
   const [occasionName, setOccasionName] = useState("");
   const [total, setTotal] = useState("");
+  const [user, setUser] = useState<any>(null);
+
+  useEffect(() => {
+    async function loadUser() {
+      const {
+        data: { user },
+        error,
+      } = await supabase.auth.getUser();
+
+      if (error) {
+        console.error("Error loading user:", error.message);
+        return;
+      }
+
+      setUser(user);
+    }
+
+    loadUser();
+  }, []);
 
   async function handleCreateSplit() {
     try {
-      if (!occasionName || !total) {
+      const trimmedTitle = occasionName.trim();
+      const trimmedTotal = total.trim();
+      const amount = parseFloat(trimmedTotal);
+
+      if (!trimmedTitle || !trimmedTotal || !user) {
         console.log("Missing data");
         return;
       }
 
-      const amount = parseFloat(total);
-
-      if (isNaN(amount)) {
+      if (isNaN(amount) || amount <= 0) {
         console.log("Invalid amount");
         return;
       }
+
       await createSplit({
-        title: occasionName,
-        totalAmount: Number(total),
+        title: trimmedTitle,
+        totalAmount: amount,
         members: [
           {
-            profileId: user!.id,
+            profileId: user.id,
             sharePercentage: 100,
             shareAmount: amount,
           },
