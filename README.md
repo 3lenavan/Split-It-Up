@@ -114,7 +114,7 @@ Console logging and test scripts were used to confirm that data was correctly st
 
 Prithvi – Authentication system and login functionality
 
-Reyrey – Split loading logic, database queries, and RLS policies
+Audrey – Split loading logic, database queries, and RLS policies
 
 Raner – Split creation and backend integration
 
