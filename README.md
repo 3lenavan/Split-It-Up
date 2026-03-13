@@ -1,4 +1,4 @@
-# Split App – Group Expense Manager
+# Split It Up App – Group Expense Manager
 
 A mobile application for managing shared expenses between friends. Users can create splits, add members, track shared costs, and view balances within a group. The goal of the project is to simplify group expense tracking while demonstrating secure full-stack application development.
 
