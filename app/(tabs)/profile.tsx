@@ -36,13 +36,7 @@ export default function ProfileScreen() {
     },
   ]);
 
-  const [pendingRequests] = useState([
-    {
-      id: "1",
-      name: "Raner Chow",
-      username: "raner_c",
-    },
-  ]);
+  const [pendingRequests, setPendingRequests] = useState<any[]>([]);
 
   const [searchResults, setSearchResults] = useState<any[]>([]);
 
@@ -86,8 +80,45 @@ export default function ProfileScreen() {
   };
 
   loadProfile();
+  loadPendingRequests();
 }, []);
 
+const loadPendingRequests = async () => {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  const currentUserId = session?.user?.id;
+
+  if (!currentUserId) return;
+
+  const { data, error } = await supabase
+  .from("friend_requests")
+  .select(`
+    id,
+    requester_id,
+    requester:profiles!requester_id (
+      full_name,
+      username
+    )
+  `)
+  .eq("addressee_id", currentUserId)
+  .eq("status", "pending");
+
+  if (error) {
+    console.error("Error loading pending requests:", error);
+    return;
+  }
+
+  const formatted =
+  data?.map((request: any) => ({
+    id: request.id,
+    name: request.requester?.full_name || "",
+    username: request.requester?.username || "",
+  })) ?? [];
+
+  setPendingRequests(formatted);
+};
 const handleSearch = async () => {
   console.log("Search button pressed");
 
@@ -124,18 +155,66 @@ const handleSearch = async () => {
   console.log("Raw search data:", data);
 
   const formatted =
-    data
-      ?.filter((user) => user.id !== currentUserId)
-      .map((user) => ({
-        id: user.id,
-        name: user.full_name,
-        username: user.username,
-        mutualFriends: 0,
-      })) ?? [];
+  data
+    ?.filter((user) => user.id !== currentUserId)
+    .map((user) => ({
+      id: user.id,
+      name: user.full_name,
+      username: user.username,
+      mutualFriends: 0,
+    })) ?? [];
 
   console.log("Formatted search results:", formatted);
 
   setSearchResults(formatted);
+};
+
+const handleAddFriend = async (addresseeId: string) => {
+  const {
+    data: { session },
+    error: sessionError,
+  } = await supabase.auth.getSession();
+
+  if (sessionError) {
+    console.error("Session error:", sessionError);
+    return;
+  }
+
+  const currentUserId = session?.user?.id;
+
+  if (!currentUserId) {
+    console.log("No logged in user found");
+    return;
+  }
+
+  if (currentUserId === addresseeId) {
+    console.log("User cannot add themselves");
+    return;
+  }
+
+  const { error } = await supabase.from("friend_requests").insert([
+    {
+      requester_id: currentUserId,
+      addressee_id: addresseeId,
+      status: "pending",
+    },
+  ]);
+
+  if (error) {
+  if (error.code === "23505") {
+    console.log("Friend request already exists");
+    return;
+  }
+
+  console.error("Error sending friend request:", error);
+  return;
+}
+
+  console.log("Friend request sent successfully");
+
+  loadPendingRequests();
+  
+  setSearchResults((prev) => prev.filter((user) => user.id !== addresseeId));
 };
 
   return (
@@ -199,7 +278,10 @@ const handleSearch = async () => {
         {user.mutualFriends} mutual friends
       </Text>
     </View>
-    <Pressable style={styles.addButton}>
+    <Pressable
+  style={styles.addButton}
+  onPress={() => handleAddFriend(user.id)}
+>
       <UserPlus size={16} color="#fff" />
       <Text style={styles.addButtonText}>Add</Text>
     </Pressable>
