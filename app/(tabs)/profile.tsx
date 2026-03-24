@@ -4,18 +4,36 @@
  * This screen allows users to view and manage their profile,
  * including viewing friends, adding new friends, and checking
  * pending friend requests.
- *
- * TO::DO - Integrate with backend to fetch real user data
- * and handle friend requests.
  *****************************************************************************/
 
-import { Check, Search, UserPlus } from "lucide-react-native";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-// Api that ensures content is within safe area boundaries
+import { supabase } from "@/lib/supabaseClient";
+import { router } from "expo-router";
+import { Check, LogOut, Search, UserPlus } from "lucide-react-native";
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 // Profile Screen Component
 export default function ProfileScreen() {
+
+  // Logout handler - signs out from Supabase and redirects to login page
+  const handleLogout = async () => {
+    Alert.alert(
+      "Log Out",
+      "Are you sure you want to log out?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Log Out",
+          style: "destructive",
+          onPress: async () => {
+            await supabase.auth.signOut();
+            router.replace("/auth"); // Brings user back to the login page
+          },
+        },
+      ]
+    );
+  };
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.container}>
@@ -78,8 +96,7 @@ export default function ProfileScreen() {
           <Text style={styles.sectionTitle}>Pending Requests</Text>
           <View style={styles.pendingCard}>
             <View>
-              <Text style={styles.resultName}>Raner Chow</Text>{" "}
-              {/* MOCK DATA */}
+              <Text style={styles.resultName}>Raner Chow</Text>
               <Text style={styles.resultUsername}>@raner_c</Text>
             </View>
             <View style={styles.pendingBadge}>
@@ -97,8 +114,7 @@ export default function ProfileScreen() {
                 <Text style={styles.friendAvatarText}>S</Text>
               </View>
               <View>
-                <Text style={styles.resultName}>Audrey Saidel</Text>{" "}
-                {/* MOCK DATA */}
+                <Text style={styles.resultName}>Audrey Saidel</Text>
                 <Text style={styles.resultUsername}>@audrey_s</Text>
               </View>
             </View>
@@ -115,6 +131,13 @@ export default function ProfileScreen() {
             </Text>
           </View>
         </View>
+
+        {/* ── Logout Button ── */}
+        <Pressable style={styles.logoutButton} onPress={handleLogout}>
+          <LogOut size={18} color="#dc2626" />
+          <Text style={styles.logoutText}>Log Out</Text>
+        </Pressable>
+
       </ScrollView>
     </SafeAreaView>
   );
@@ -245,4 +268,23 @@ const styles = StyleSheet.create({
   },
   emptyContainer: { paddingVertical: 32, alignItems: "center" },
   emptyText: { fontSize: 12, color: "#6b7280" },
+
+  // Logout button styles
+  logoutButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    marginTop: 8,
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#fecaca",
+    backgroundColor: "#fff5f5",
+  },
+  logoutText: {
+    color: "#dc2626",
+    fontSize: 15,
+    fontWeight: "600",
+  },
 });
