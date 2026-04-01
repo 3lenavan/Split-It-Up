@@ -4,16 +4,21 @@
  * This screen allows users to view and manage their profile,
  * including viewing friends, adding new friends, and checking
  * pending friend requests.
- *
- * TO::DO - Integrate with backend to fetch real user data
- * and handle friend requests.
  *****************************************************************************/
 
-import { Check, Search, UserPlus } from "lucide-react-native";
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
-import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
-// Api that ensures content is within safe area boundaries
+import { router } from "expo-router";
+import { Check, LogOut, Search, UserPlus } from "lucide-react-native";
+import {
+  Alert,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
+import { useEffect, useState } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 
@@ -28,60 +33,50 @@ export default function ProfileScreen() {
   email: "",
 });
 
-    const [friends] = useState([
-    {
-      id: "1",
-      name: "Audrey Saidel",
-      username: "audrey_s",
-    },
-  ]);
+  const [friends, setFriends] = useState<any[]>([]);
+  const [sentRequests, setSentRequests] = useState<string[]>([]);
 
   const [pendingRequests, setPendingRequests] = useState<any[]>([]);
 
   const [searchResults, setSearchResults] = useState<any[]>([]);
 
-  useEffect(() => {
   const loadProfile = async () => {
-    const {
-      data: { session },
-      error: sessionError,
-    } = await supabase.auth.getSession();
+  const {
+    data: { session },
+    error: sessionError,
+  } = await supabase.auth.getSession();
 
-    const user = session?.user;
+  const user = session?.user;
 
-    if (!user) {
-      console.log("No user session found");
-      return;
-    }
+  if (!user) {
+    console.log("No user session found");
+    return;
+  }
 
-    if (sessionError) {
-      console.error("Error getting session:", sessionError);
-      return;
-    }
+  if (sessionError) {
+    console.error("Error getting session:", sessionError);
+    return;
+  }
 
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("full_name, username, email")
-      .eq("id", user.id)
-      .single();
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("full_name, username, email")
+    .eq("id", user.id)
+    .single();
 
-    if (error) {
-      console.error("Error loading profile:", error);
-      return;
-    }
+  if (error) {
+    console.error("Error loading profile:", error);
+    return;
+  }
 
-    if (data) {
-      setProfile({
-        name: data.full_name || "",
-        username: data.username || "",
-        email: data.email || "",
-      });
-    }
-  };
-
-  loadProfile();
-  loadPendingRequests();
-}, []);
+  if (data) {
+    setProfile({
+      name: data.full_name || "",
+      username: data.username || "",
+      email: data.email || "",
+    });
+  }
+};
 
 const loadPendingRequests = async () => {
   const {
@@ -93,17 +88,17 @@ const loadPendingRequests = async () => {
   if (!currentUserId) return;
 
   const { data, error } = await supabase
-  .from("friend_requests")
-  .select(`
-    id,
-    requester_id,
-    requester:profiles!requester_id (
-      full_name,
-      username
-    )
-  `)
-  .eq("addressee_id", currentUserId)
-  .eq("status", "pending");
+    .from("friend_requests")
+    .select(`
+      id,
+      requester_id,
+      requester:profiles!requester_id (
+        full_name,
+        username
+      )
+    `)
+    .eq("addressee_id", currentUserId)
+    .eq("status", "pending");
 
   if (error) {
     console.error("Error loading pending requests:", error);
@@ -111,15 +106,83 @@ const loadPendingRequests = async () => {
   }
 
   const formatted =
-  data?.map((request: any) => ({
-    id: request.id,
-    name: request.requester?.full_name || "",
-    username: request.requester?.username || "",
-  })) ?? [];
+    data?.map((request: any) => ({
+      id: request.id,
+      name: request.requester?.full_name || "",
+      username: request.requester?.username || "",
+    })) ?? [];
 
   setPendingRequests(formatted);
 };
-const handleSearch = async () => {
+
+const loadSentRequests = async () => {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  const currentUserId = session?.user?.id;
+
+  if (!currentUserId) return;
+
+  const { data, error } = await supabase
+    .from("friend_requests")
+    .select("addressee_id")
+    .eq("requester_id", currentUserId)
+    .eq("status", "pending");
+
+  if (error) {
+    console.error("Error loading sent requests:", error);
+    return;
+  }
+
+  const sentIds = data?.map((item: any) => item.addressee_id) ?? [];
+  setSentRequests(sentIds);
+};
+
+const loadFriends = async () => {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  const currentUserId = session?.user?.id;
+
+  if (!currentUserId) return;
+
+  const { data, error } = await supabase
+    .from("friends")
+    .select(`
+      friend_id,
+      friend:profiles!friend_id (
+        id,
+        full_name,
+        username
+      )
+    `)
+    .eq("user_id", currentUserId);
+
+  if (error) {
+    console.error("Error loading friends:", error);
+    return;
+  }
+
+  const formatted =
+    data?.map((item: any) => ({
+      id: item.friend?.id,
+      name: item.friend?.full_name || "",
+      username: item.friend?.username || "",
+    })) ?? [];
+
+  setFriends(formatted);
+};
+
+useEffect(() => {
+  loadProfile();
+  loadPendingRequests();
+  loadSentRequests();
+  loadFriends();
+}, []);
+
+  const handleSearch = async () => {
   console.log("Search button pressed");
 
   if (!searchText.trim()) {
@@ -155,14 +218,17 @@ const handleSearch = async () => {
   console.log("Raw search data:", data);
 
   const formatted =
-  data
-    ?.filter((user) => user.id !== currentUserId)
-    .map((user) => ({
-      id: user.id,
-      name: user.full_name,
-      username: user.username,
-      mutualFriends: 0,
-    })) ?? [];
+    data
+      ?.filter((user) => user.id !== currentUserId)
+      .map((user) => ({
+        id: user.id,
+        name: user.full_name,
+        username: user.username,
+        mutualFriends: 0,
+        isPending: sentRequests.includes(user.id),
+        isFriend: friends.some((friend) => friend.id === user.id),
+      }))
+      .filter((user) => !user.isFriend) ?? [];
 
   console.log("Formatted search results:", formatted);
 
@@ -201,20 +267,35 @@ const handleAddFriend = async (addresseeId: string) => {
   ]);
 
   if (error) {
-  if (error.code === "23505") {
-    console.log("Friend request already exists");
+    if (error.code === "23505") {
+      console.log("Friend request already exists");
+      await loadSentRequests();
+
+      setSearchResults((prev) =>
+        prev.map((user) =>
+          user.id === addresseeId
+            ? { ...user, isPending: true }
+            : user
+        )
+      );
+      return;
+    }
+
+    console.error("Error sending friend request:", error);
     return;
   }
 
-  console.error("Error sending friend request:", error);
-  return;
-}
-
   console.log("Friend request sent successfully");
 
-  loadPendingRequests();
-  
-  setSearchResults((prev) => prev.filter((user) => user.id !== addresseeId));
+  await loadSentRequests();
+
+  setSearchResults((prev) =>
+    prev.map((user) =>
+      user.id === addresseeId
+        ? { ...user, isPending: true }
+        : user
+    )
+  );
 };
 
 const handleAcceptRequest = async (requestId: string) => {
@@ -254,7 +335,8 @@ const handleAcceptRequest = async (requestId: string) => {
 
   console.log("Friend request accepted");
 
-  loadPendingRequests();
+await loadPendingRequests();
+await loadFriends();
 };
 
 const handleDeclineRequest = async (requestId: string) => {
@@ -270,7 +352,25 @@ const handleDeclineRequest = async (requestId: string) => {
 
   console.log("Friend request declined");
 
-  loadPendingRequests();
+  await loadPendingRequests();
+};
+
+const handleLogout = async () => {
+  Alert.alert(
+    "Log Out",
+    "Are you sure you want to log out?",
+    [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Log Out",
+        style: "destructive",
+        onPress: async () => {
+          await supabase.auth.signOut();
+          router.replace("/auth");
+        },
+      },
+    ]
+  );
 };
 
   return (
@@ -335,12 +435,20 @@ const handleDeclineRequest = async (requestId: string) => {
       </Text>
     </View>
     <Pressable
-  style={styles.addButton}
-  onPress={() => handleAddFriend(user.id)}
+  style={[styles.addButton, user.isPending && styles.pendingButton]}
+  
+  onPress={() => !user.isPending && handleAddFriend(user.id)}
+  disabled={user.isPending}
 >
+  {user.isPending ? (
+    <Text style={styles.addButtonText}>Pending</Text>
+  ) : (
+    <>
       <UserPlus size={16} color="#fff" />
       <Text style={styles.addButtonText}>Add</Text>
-    </Pressable>
+    </>
+  )}
+</Pressable>
   </View>
 ))}
         </View>
@@ -381,7 +489,7 @@ const handleDeclineRequest = async (requestId: string) => {
     <View style={styles.friendInfo}>
       <View style={styles.friendAvatar}>
         <Text style={styles.friendAvatarText}>
-          {friend.name.charAt(0).toUpperCase()}
+          {friend.name ? friend.name.charAt(0).toUpperCase() : "?"}
         </Text>
       </View>
       <View>
@@ -405,6 +513,13 @@ const handleDeclineRequest = async (requestId: string) => {
   </View>
 )}
         </View>
+
+        {/* ── Logout Button ── */}
+        <Pressable style={styles.logoutButton} onPress={handleLogout}>
+          <LogOut size={18} color="#dc2626" />
+          <Text style={styles.logoutText}>Log Out</Text>
+        </Pressable>
+
       </ScrollView>
     </SafeAreaView>
   );
@@ -414,7 +529,6 @@ const handleDeclineRequest = async (requestId: string) => {
 const styles = StyleSheet.create({
   requestActions: {
   flexDirection: "row",
-  gap: 8,
 },
 
 acceptButton: {
@@ -423,6 +537,10 @@ acceptButton: {
   paddingHorizontal: 10,
   paddingVertical: 6,
 },
+
+pendingButton: {
+    backgroundColor: "#9ca3af",
+  },
 
 declineButton: {
   backgroundColor: "#dc2626",
@@ -515,7 +633,6 @@ requestButtonText: {
     borderRadius: 8,
     paddingHorizontal: 8,
     paddingVertical: 4,
-    gap: 4,
   },
   addButtonText: { color: "#fff", fontSize: 12, fontWeight: "600" },
   pendingCard: {
@@ -557,7 +674,7 @@ requestButtonText: {
     marginRight: 12,
   },
   friendAvatarText: { color: "#fff", fontWeight: "700" },
-  friendStatus: { flexDirection: "row", alignItems: "center", gap: 4 },
+  friendStatus: { flexDirection: "row", alignItems: "center"},
   friendStatusText: {
     fontSize: 12,
     fontWeight: "600",
@@ -566,4 +683,23 @@ requestButtonText: {
   },
   emptyContainer: { paddingVertical: 32, alignItems: "center" },
   emptyText: { fontSize: 12, color: "#6b7280" },
+
+  // Logout button styles
+  logoutButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 8,
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#fecaca",
+    backgroundColor: "#fff5f5",
+  },
+  logoutText: {
+    color: "#dc2626",
+    fontSize: 15,
+    fontWeight: "600",
+    marginLeft: 8
+  },
 });
