@@ -217,6 +217,62 @@ const handleAddFriend = async (addresseeId: string) => {
   setSearchResults((prev) => prev.filter((user) => user.id !== addresseeId));
 };
 
+const handleAcceptRequest = async (requestId: string) => {
+  const { data: request, error: fetchError } = await supabase
+    .from("friend_requests")
+    .select("*")
+    .eq("id", requestId)
+    .single();
+
+  if (fetchError) {
+    console.error("Error fetching request:", fetchError);
+    return;
+  }
+
+  const requesterId = request.requester_id;
+  const addresseeId = request.addressee_id;
+
+  const { error: updateError } = await supabase
+    .from("friend_requests")
+    .update({ status: "accepted" })
+    .eq("id", requestId);
+
+  if (updateError) {
+    console.error("Error accepting request:", updateError);
+    return;
+  }
+
+  const { error: friendError } = await supabase.from("friends").insert([
+    { user_id: requesterId, friend_id: addresseeId },
+    { user_id: addresseeId, friend_id: requesterId },
+  ]);
+
+  if (friendError) {
+    console.error("Error adding friendship:", friendError);
+    return;
+  }
+
+  console.log("Friend request accepted");
+
+  loadPendingRequests();
+};
+
+const handleDeclineRequest = async (requestId: string) => {
+  const { error } = await supabase
+    .from("friend_requests")
+    .update({ status: "declined" })
+    .eq("id", requestId);
+
+  if (error) {
+    console.error("Error declining request:", error);
+    return;
+  }
+
+  console.log("Friend request declined");
+
+  loadPendingRequests();
+};
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.container}>
@@ -298,9 +354,21 @@ const handleAddFriend = async (addresseeId: string) => {
       <Text style={styles.resultName}>{request.name}</Text>
       <Text style={styles.resultUsername}>@{request.username}</Text>
     </View>
-    <View style={styles.pendingBadge}>
-      <Text style={styles.pendingText}>Pending</Text>
-    </View>
+    <View style={styles.requestActions}>
+  <Pressable
+    style={styles.acceptButton}
+    onPress={() => handleAcceptRequest(request.id)}
+  >
+    <Text style={styles.requestButtonText}>Accept</Text>
+  </Pressable>
+
+  <Pressable
+    style={styles.declineButton}
+    onPress={() => handleDeclineRequest(request.id)}
+  >
+    <Text style={styles.requestButtonText}>Decline</Text>
+  </Pressable>
+</View>
   </View>
 ))}
         </View>
@@ -344,6 +412,31 @@ const handleAddFriend = async (addresseeId: string) => {
 
 // Styles for Profile Screen
 const styles = StyleSheet.create({
+  requestActions: {
+  flexDirection: "row",
+  gap: 8,
+},
+
+acceptButton: {
+  backgroundColor: "#16a34a",
+  borderRadius: 8,
+  paddingHorizontal: 10,
+  paddingVertical: 6,
+},
+
+declineButton: {
+  backgroundColor: "#dc2626",
+  borderRadius: 8,
+  paddingHorizontal: 10,
+  paddingVertical: 6,
+},
+
+requestButtonText: {
+  color: "#fff",
+  fontSize: 12,
+  fontWeight: "600",
+},
+
   safeArea: { flex: 1, backgroundColor: "#fff" },
   container: { paddingHorizontal: 16, paddingTop: 24, paddingBottom: 40 },
   profileHeader: {
