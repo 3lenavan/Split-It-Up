@@ -51,7 +51,12 @@ export default function SignUpScreen() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [pronounModalVisible, setPronounModalVisible] = useState(false)
   const [showCustomPronoun, setShowCustomPronoun] = useState(false)
-  const [passwordChecks, setPasswordChecks] = useState({ length: false, match: false, hasNumber: false, hasLetter: false })
+  const [passwordChecks, setPasswordChecks] = useState({
+  length: false,
+  match: false,
+  hasNumber: false,
+  hasLetter: false,
+})
 
   // ── All original animations — untouched ─────────────────────
   const fadeAnim = useRef(new Animated.Value(0)).current
@@ -89,14 +94,20 @@ export default function SignUpScreen() {
 
   const pickImage = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync()
-    if (status !== 'granted') { Alert.alert('Permission needed', 'Please grant permission to access your photos'); return }
+    if (status !== 'granted') {
+  Alert.alert('Permission needed', 'Please grant permission to access your photos')
+  return
+}
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [1, 1], quality: 0.8 })
     if (!result.canceled) setProfileImage(result.assets[0].uri)
   }
 
   const takePhoto = async () => {
     const { status } = await ImagePicker.requestCameraPermissionsAsync()
-    if (status !== 'granted') { Alert.alert('Permission needed', 'Please grant camera permission'); return }
+    if (status !== 'granted') {
+  Alert.alert('Permission needed', 'Please grant camera permission')
+  return
+}
     const result = await ImagePicker.launchCameraAsync({ allowsEditing: true, aspect: [1, 1], quality: 0.8 })
     if (!result.canceled) setProfileImage(result.assets[0].uri)
   }
@@ -121,24 +132,43 @@ export default function SignUpScreen() {
   }
 
   const signUp = async () => {
-    if (!validateInputs()) return
-    setLoading(true)
-    const finalPronouns = showCustomPronoun ? customPronouns : pronouns
-    const { data, error } = await supabase.auth.signUp({ email, password })
-    if (error || !data.user) { setLoading(false); return Alert.alert('Sign up error', error?.message ?? 'No user returned') }
-    const { error: profileError } = await supabase.from('profiles').insert({ id: data.user.id, username, full_name: fullName, email, avatar_url: null })
-    setLoading(false)
-    if (profileError) return Alert.alert('Profile error', profileError.message)
-    Alert.alert('🎉 Success!', 'Your account has been created! Please login.', [{
-      text: 'Go to Login',
-      onPress: () => {
-        Animated.parallel([
-          Animated.timing(fadeAnim, { toValue: 0, duration: 300, useNativeDriver: true }),
-          Animated.timing(slideAnim, { toValue: -50, duration: 300, useNativeDriver: true }),
-        ]).start(() => { router.push('/auth') })
+  if (!validateInputs()) return
+
+  setLoading(true)
+
+  try {
+    const cleanFullName = fullName.trim()
+    const cleanUsername = username.trim().toLowerCase()
+    const cleanEmail = email.trim().toLowerCase()
+
+    const { data, error } = await supabase.auth.signUp({
+      email: cleanEmail,
+      password,
+      options: {
+        data: {
+          full_name: cleanFullName,
+          username: cleanUsername,
+        },
       },
-    }])
+    })
+
+    setLoading(false)
+
+    if (error || !data.user) {
+      return Alert.alert('Sign up error', error?.message ?? 'No user returned')
+    }
+
+    Alert.alert('Success!', 'Your account has been created! Please login.', [
+      {
+        text: 'Go to Login',
+        onPress: () => router.push('/auth'),
+      },
+    ])
+  } catch (err: any) {
+    setLoading(false)
+    Alert.alert('Error', err?.message ?? 'Something went wrong')
   }
+}
 
   const navigateToLogin = () => {
     Animated.parallel([
