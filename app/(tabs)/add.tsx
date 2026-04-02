@@ -6,9 +6,10 @@
  * TO::DO - Integrate with backend to save new splits and manage participants.
  *******************************************************************************/
 import { supabase } from "@/lib/supabaseClient";
-
+import * as Haptics from "expo-haptics";
 import { Percent, Plus } from "lucide-react-native";
 import {
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -76,6 +77,12 @@ export default function AddScreen({
         ],
       });
       if (onSplitCreated) onSplitCreated();
+
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert("Split Created", "Your split has been created successfully!");
+      // clear the form after success
+      setOccasionName("");
+      setTotal("");
     } catch (err) {
       console.error(err);
     }
