@@ -1,50 +1,137 @@
-# Welcome to your Expo app 👋
+# Split It Up App – Group Expense Manager
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+A mobile application for managing shared expenses between friends. Users can create splits, add members, track shared costs, and view balances within a group. The goal of the project is to simplify group expense tracking while demonstrating secure full-stack application development.
 
-## Get started
+This project was developed using React Native with Expo and integrates with a backend powered by Supabase for authentication and database management.
 
-1. Install dependencies
+# Features
 
-   ```bash
-   npm install
-   ```
+- User authentication (sign up and login)
 
-2. Start the app
+- Create and manage shared expense splits
 
-   ```bash
-   npx expo start
-   ```
+- View all splits associated with a user
 
-In the output, you'll find options to open the app in a
+- Add friends through username search
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+- Secure database access using Row Level Security (RLS)
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+- Profile page displaying user information
 
-## Get a fresh project
+- Backend validation and database integration
 
-When you're ready, run:
+# Tech Stack
 
-```bash
-npm run reset-project
-```
+## Frontend
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+- React Native
 
-## Learn more
+- Expo
 
-To learn more about developing your project with Expo, look at the following resources:
+- TypeScript
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+- Expo Router
 
-## Join the community
+## Backend
 
-Join our community of developers creating universal apps.
+- Supabase
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+- PostgreSQL Database
+
+- Supabase Authentication
+
+- Row Level Security (RLS)
+
+## Development Tools
+
+- Git / GitHub
+
+- Node.js
+
+- npm
+
+# Project Architecture
+
+The application follows a client–server architecture. The frontend handles user interaction and UI rendering, communicates with Supabase using API calls.
+
+The backend stores application data in a PostgreSQL database, handles authentication and session management, and enforces security through RLS policies.
+
+*Main database tables include:*
+
+profiles – stores user information
+
+splits – stores split metadata
+
+split_members – tracks which users belong to each split
+
+# Installation
+
+Clone the repository:
+
+git clone <repo-url>
+cd <project-folder>
+
+Install dependencies:
+
+npm install
+
+Start the development server:
+
+npx expo start
+
+Then open the app using:
+
+Expo Go (mobile device)
+
+Android Emulator
+
+iOS Simulator
+
+# Environment Setup
+
+Create a .env file and add your Supabase credentials:
+
+EXPO_PUBLIC_SUPABASE_URL=your_supabase_url
+EXPO_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
+
+These keys allow the application to communicate with the backend services.
+
+# Testing
+
+Testing was performed by verifying database operations and frontend interactions, including:
+
+- user authentication
+
+- split creation
+
+- database inserts and queries
+
+- friend search functionality
+
+Console logging and test scripts were used to confirm that data was correctly stored and retrieved from the database.
+
+# Team Members
+
+Prithvi – Authentication system and login functionality
+
+Audrey – Split loading logic, database queries, and RLS policies
+
+Raner – Split creation and backend integration
+
+Elena – Profile page and user search functionality
+
+# Future Improvements
+
+Complete friend request system
+
+Add expense items within splits
+
+Implement balance calculations between users
+
+Improve UI and user experience
+
+Add automated testing
+
+# License
+
+This project was developed for educational purposes.
