@@ -7,7 +7,8 @@
  *******************************************************************************/
 
 import { supabase } from "@/lib/supabaseClient";
-import { useEffect, useState } from "react";
+import { useFocusEffect } from "@react-navigation/native";
+import React, { useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 export default function HomeScreen() {
@@ -21,51 +22,55 @@ export default function HomeScreen() {
   const [splits, setSplits] = useState<Split[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    /****
-     * Name: loadSplits
-     * Description: Fetches splits data for the authenticated user
-     * from Supabase and sets it in state.
-     */
-    const loadSplits = async () => {
-      const {
-        data: { session },
-        error: authError,
-      } = await supabase.auth.getSession();
-      const user = session?.user;
+  /****
+   * Name: loadSplits
+   * Description: Fetches splits data for the authenticated user
+   * from Supabase and sets it in state.
+   */
+  const loadSplits = async () => {
+    const {
+      data: { session },
+      error: authError,
+    } = await supabase.auth.getSession();
+    const user = session?.user;
 
-      if (!user) {
-        console.log("No user session yet");
-        setLoading(false);
-        return;
-      }
-      if (authError) {
-        // if theres an authentication error or not a user
-        console.error("Error fetching user:", authError);
-        setLoading(false);
-        return;
-      }
-      // query supabase for splits that the user is a member of, and get the split details
-      // store in data variable. The query uses a join to get the split details from the splits table based on the split_id in the split_members table, and filters by the current user's profile_id.
-      const { data, error } = await supabase
-        .from("split_members")
-        .select(`split_id, splits(id, title, total_amount, created_at)`)
-        .eq("profile_id", user.id);
-      console.log("SPLITS DATA:", data);
-      console.log("SESSION USER:", user?.id);
-      // if theres an error fetching the splits, log it. Otherwise, format the data to extract the splits and set it in state
-      if (error) {
-        console.error("Error fetching splits:", error);
-        setLoading(false);
-        return;
-      } else {
-        const formatted: Split[] = data?.flatMap((item) => item.splits) ?? [];
-        setSplits(formatted); // replace splits state with the formatted splits data from the backend
-      }
+    if (!user) {
+      console.log("No user session yet");
       setLoading(false);
-    };
-    loadSplits();
-  }, []);
+      return;
+    }
+    if (authError) {
+      // if theres an authentication error or not a user
+      console.error("Error fetching user:", authError);
+      setLoading(false);
+      return;
+    }
+    // query supabase for splits that the user is a member of, and get the split details
+    // store in data variable. The query uses a join to get the split details from the splits table based on the split_id in the split_members table, and filters by the current user's profile_id.
+    const { data, error } = await supabase
+      .from("split_members")
+      .select(`split_id, splits(id, title, total_amount, created_at)`)
+      .eq("profile_id", user.id);
+    console.log("SPLITS DATA:", data);
+    console.log("SESSION USER:", user?.id);
+    // if theres an error fetching the splits, log it. Otherwise, format the data to extract the splits and set it in state
+    if (error) {
+      console.error("Error fetching splits:", error);
+      setLoading(false);
+      return;
+    } else {
+      const formatted: Split[] =
+        data?.flatMap((item) => item.splits ?? []) ?? [];
+      setSplits(formatted); // replace splits state with the formatted splits data from the backend
+    }
+    setLoading(false);
+  };
+
+  useFocusEffect(
+    React.useCallback(() => {
+      loadSplits();
+    }, []),
+  );
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.container}>

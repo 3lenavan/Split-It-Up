@@ -21,7 +21,11 @@ import { createSplit } from "@/lib/split";
 import { useEffect, useState } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-export default function AddScreen() {
+export default function AddScreen({
+  onSplitCreated,
+}: {
+  onSplitCreated?: () => void;
+}) {
   const [occasionName, setOccasionName] = useState("");
   const [total, setTotal] = useState("");
   const [user, setUser] = useState<any>(null);
@@ -71,6 +75,7 @@ export default function AddScreen() {
           },
         ],
       });
+      if (onSplitCreated) onSplitCreated();
     } catch (err) {
       console.error(err);
     }
