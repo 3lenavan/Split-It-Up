@@ -76,10 +76,11 @@ export default function AddScreen({
           },
         ],
       });
-      if (onSplitCreated) onSplitCreated();
 
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       Alert.alert("Split Created", "Your split has been created successfully!");
+
+      if (onSplitCreated) onSplitCreated();
       // clear the form after success
       setOccasionName("");
       setTotal("");
