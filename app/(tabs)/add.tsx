@@ -20,12 +20,23 @@ import {
 // Api that ensures content is within safe area boundaries
 import { createSplit } from "@/lib/split";
 import { useEffect, useState } from "react";
+import {
+  GestureHandlerRootView,
+  Swipeable,
+} from "react-native-gesture-handler";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-export default function AddScreen() {
+export default function AddScreen({
+  onSplitCreated,
+}: {
+  onSplitCreated?: () => void;
+}) {
   const [occasionName, setOccasionName] = useState("");
   const [total, setTotal] = useState("");
   const [user, setUser] = useState<any>(null);
+  const [friends, setFriends] = useState<any[]>([]);
+  const [selectedFriends, setSelectedFriends] = useState<any[]>([]);
+  const [showFriends, setShowFriends] = useState(false);
 
   useEffect(() => {
     async function loadUser() {
@@ -40,6 +51,26 @@ export default function AddScreen() {
       }
 
       setUser(user);
+
+      // Load friends - TODO: replace with actual friends data
+      const { data: friendsData, error: friendsError } = await supabase
+        .from("friends")
+        .select(
+          `
+          id,
+          user_id,
+          friend_id,
+          profiles:friend_id ( id, full_name, username )
+        `,
+        )
+        .eq("user_id", user?.id || ""); // fallback if user is null
+
+      if (friendsError) {
+        console.error("Error fetching friends:", friendsError);
+        return;
+      }
+
+      setFriends(friendsData);
     }
 
     loadUser();
@@ -50,6 +81,9 @@ export default function AddScreen() {
       const trimmedTitle = occasionName.trim();
       const trimmedTotal = total.trim();
       const amount = parseFloat(trimmedTotal);
+      const totalPeople = selectedFriends.length + 1;
+      const splitAmount = amount / totalPeople;
+      const splitPercentage = 100 / totalPeople;
 
       if (!trimmedTitle || !trimmedTotal || !user) {
         console.log("Missing data");
@@ -67,14 +101,21 @@ export default function AddScreen() {
         members: [
           {
             profileId: user.id,
-            sharePercentage: 100,
-            shareAmount: amount,
+            sharePercentage: splitPercentage,
+            shareAmount: splitAmount,
           },
+          ...selectedFriends.map((f) => ({
+            profileId: f.id,
+            sharePercentage: splitPercentage,
+            shareAmount: splitAmount,
+          })),
         ],
       });
 
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       Alert.alert("Split Created", "Your split has been created successfully!");
+
+      if (onSplitCreated) onSplitCreated();
       // clear the form after success
       setOccasionName("");
       setTotal("");
@@ -84,72 +125,162 @@ export default function AddScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.container}>
-        {/* Title */}
-        <Text style={styles.title}>Create New Split</Text>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaView style={styles.safeArea}>
+        <ScrollView contentContainerStyle={styles.container}>
+          {/* Title */}
+          <Text style={styles.title}>Create New Split</Text>
 
-        {/* Occasion Name */}
-        <View style={styles.section}>
-          <Text style={styles.label}>Occasion Name</Text>
-          <TextInput
-            placeholder="e.g. Vegas Trip, Dinner"
-            style={styles.input}
-            value={occasionName}
-            onChangeText={setOccasionName}
-          />
-        </View>
-
-        {/* Total Amount */}
-        <View style={styles.section}>
-          <Text style={styles.label}>Total Amount</Text>
-          <View style={styles.amountContainer}>
-            <Text style={styles.amountDollar}>$</Text>
+          {/* Occasion Name */}
+          <View style={styles.section}>
+            <Text style={styles.label}>Occasion Name</Text>
             <TextInput
-              placeholder="0.00"
-              keyboardType="numeric"
-              style={styles.amountInput}
-              value={total}
-              onChangeText={setTotal}
+              placeholder="e.g. Vegas Trip, Dinner"
+              style={styles.input}
+              value={occasionName}
+              onChangeText={setOccasionName}
             />
           </View>
-        </View>
 
-        {/* Split With Friends */}
-        <View style={styles.section}>
-          <View style={styles.splitHeader}>
-            <Text style={styles.label}>Split With Friends</Text>
-            <View style={styles.splitEvenly}>
-              <Percent size={14} color="#8b16a3ff" />
-              <Text style={styles.splitText}>Split Evenly</Text>
+          {/* Total Amount */}
+          <View style={styles.section}>
+            <Text style={styles.label}>Total Amount</Text>
+            <View style={styles.amountContainer}>
+              <Text style={styles.amountDollar}>$</Text>
+              <TextInput
+                placeholder="0.00"
+                keyboardType="numeric"
+                style={styles.amountInput}
+                value={total}
+                onChangeText={setTotal}
+              />
             </View>
           </View>
-          {/* Friend Card TODO */}
-        </View>
 
-        {/* Progress Bar */}
-        <View style={styles.section}>
-          <View style={styles.progressHeader}>
-            <Text style={styles.label}>Total</Text>
-            <Text style={styles.progressText}>100%</Text>
+          {/* Split With Friends */}
+          <View style={styles.section}>
+            <View style={styles.splitHeader}>
+              <Text style={styles.label}>Split With Friends</Text>
+              <View style={styles.splitEvenly}>
+                <Percent size={14} color="#8b16a3ff" />
+                <Text style={styles.splitText}>Split Evenly</Text>
+              </View>
+            </View>
+            {/* Selected Friends */}
+            {selectedFriends.map((friend) => (
+              <Swipeable
+                key={friend.id}
+                renderRightActions={() => (
+                  <Pressable
+                    onPress={() =>
+                      setSelectedFriends((prev) =>
+                        prev.filter((f) => f.id !== friend.id),
+                      )
+                    }
+                    style={{
+                      backgroundColor: "#ef4444",
+                      justifyContent: "center",
+                      alignItems: "center",
+                      width: 80,
+                      marginVertical: 8,
+                      borderRadius: 8,
+                    }}
+                  >
+                    <Text style={{ color: "#fff", fontWeight: "600" }}>
+                      Delete
+                    </Text>
+                  </Pressable>
+                )}
+              >
+                <View style={styles.friendCard}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.friendName}>{friend.full_name}</Text>
+                    <Text style={styles.friendHandle}>@{friend.username}</Text>
+                  </View>
+
+                  <View style={styles.friendSplit}>
+                    <Text style={styles.amountText}>$0.00</Text>
+                  </View>
+                </View>
+              </Swipeable>
+            ))}
           </View>
-          <View style={styles.progressBar}>
-            <View style={styles.progressFill} />
+
+          {/* Progress Bar */}
+          <View style={styles.section}>
+            <View style={styles.progressHeader}>
+              <Text style={styles.label}>Total</Text>
+              <Text style={styles.progressText}>100%</Text>
+            </View>
+            <View style={styles.progressBar}>
+              <View style={styles.progressFill} />
+            </View>
           </View>
-        </View>
 
-        {/* Add Friend Button */}
-        <Pressable style={styles.addFriendButton}>
-          <Plus size={16} color="#6b7280" />
-          <Text style={styles.addFriendText}>Add Friend</Text>
-        </Pressable>
+          {/* Add Friend Button */}
+          <Pressable
+            style={styles.addFriendButton}
+            onPress={() => setShowFriends(!showFriends)}
+          >
+            <Plus size={16} color="#6b7280" />
+            <Text style={styles.addFriendText}>Add Friend</Text>
+          </Pressable>
 
-        {/* Create Button */}
-        <Pressable style={styles.createButton} onPress={handleCreateSplit}>
-          <Text style={styles.createButtonText}>Create Split</Text>
-        </Pressable>
-      </ScrollView>
-    </SafeAreaView>
+          {/* Friend Picker */}
+          {showFriends && (
+            <>
+              {friends.length === 0 ? (
+                <View style={{ padding: 12, alignItems: "center" }}>
+                  <Text
+                    style={{
+                      color: "#6b7280",
+                      fontSize: 14,
+                      textAlign: "center",
+                    }}
+                  >
+                    You have no friends yet. Add some now!
+                  </Text>
+                </View>
+              ) : (
+                friends.map((f) => {
+                  const friendProfile = f.profiles;
+
+                  return (
+                    <Pressable
+                      key={f.id}
+                      style={styles.friendCard}
+                      onPress={() => {
+                        if (
+                          selectedFriends.find(
+                            (sf) => sf.id === friendProfile.id,
+                          )
+                        )
+                          return;
+                        setSelectedFriends((prev) => [...prev, friendProfile]);
+                      }}
+                    >
+                      <View>
+                        <Text style={styles.friendName}>
+                          {friendProfile.full_name}
+                        </Text>
+                        <Text style={styles.friendHandle}>
+                          @{friendProfile.username}
+                        </Text>
+                      </View>
+                    </Pressable>
+                  );
+                })
+              )}
+            </>
+          )}
+
+          {/* Create Button */}
+          <Pressable style={styles.createButton} onPress={handleCreateSplit}>
+            <Text style={styles.createButtonText}>Create Split</Text>
+          </Pressable>
+        </ScrollView>
+      </SafeAreaView>
+    </GestureHandlerRootView>
   );
 }
 
