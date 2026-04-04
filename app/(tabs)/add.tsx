@@ -37,6 +37,7 @@ export default function AddScreen({
   const [friends, setFriends] = useState<any[]>([]);
   const [selectedFriends, setSelectedFriends] = useState<any[]>([]);
   const [showFriends, setShowFriends] = useState(false);
+  const [userShareAmount, setUserShareAmount] = useState(0);
 
   useEffect(() => {
     async function loadUser() {
@@ -82,7 +83,10 @@ export default function AddScreen({
       const trimmedTotal = total.trim();
       const amount = parseFloat(trimmedTotal);
       const totalPeople = selectedFriends.length + 1;
-      const splitAmount = amount / totalPeople;
+      // Derived value: split per person
+      const splitAmount = selectedFriends.length
+        ? parseFloat(total || "0") / (selectedFriends.length + 1) // +1 for current user
+        : 0;
       const splitPercentage = 100 / totalPeople;
 
       if (!trimmedTitle || !trimmedTotal || !user) {
@@ -161,10 +165,28 @@ export default function AddScreen({
           <View style={styles.section}>
             <View style={styles.splitHeader}>
               <Text style={styles.label}>Split With Friends</Text>
-              <View style={styles.splitEvenly}>
+              <Pressable
+                style={styles.splitEvenly}
+                onPress={() => {
+                  // Calculate each person's share (including the creator)
+                  const totalAmount = parseFloat(total || "0");
+                  const perPerson =
+                    selectedFriends.length > 0
+                      ? totalAmount / (selectedFriends.length + 1)
+                      : totalAmount;
+
+                  // Update each friend's share amount
+                  setSelectedFriends((prev) =>
+                    prev.map((f) => ({ ...f, shareAmount: perPerson })),
+                  );
+
+                  // Optionally track creator's share
+                  setUserShareAmount(perPerson);
+                }}
+              >
                 <Percent size={14} color="#8b16a3ff" />
                 <Text style={styles.splitText}>Split Evenly</Text>
-              </View>
+              </Pressable>
             </View>
             {/* Selected Friends */}
             {selectedFriends.map((friend) => (
@@ -199,7 +221,9 @@ export default function AddScreen({
                   </View>
 
                   <View style={styles.friendSplit}>
-                    <Text style={styles.amountText}>$0.00</Text>
+                    <Text style={styles.amountText}>
+                      ${friend.shareAmount?.toFixed(2) || "0.00"}
+                    </Text>
                   </View>
                 </View>
               </Swipeable>
