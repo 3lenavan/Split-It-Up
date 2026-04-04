@@ -5,9 +5,11 @@
  *
  * TO::DO - Integrate with backend to save new splits and manage participants.
  *******************************************************************************/
-
-import { Percent, Plus, X } from "lucide-react-native";
+import { supabase } from "@/lib/supabaseClient";
+import * as Haptics from "expo-haptics";
+import { Percent, Plus } from "lucide-react-native";
 import {
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -16,91 +18,331 @@ import {
   View,
 } from "react-native";
 // Api that ensures content is within safe area boundaries
+import { createSplit } from "@/lib/split";
+import { useEffect, useState } from "react";
+import {
+  GestureHandlerRootView,
+  Swipeable,
+} from "react-native-gesture-handler";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-export default function AddScreen() {
+export default function AddScreen({
+  onSplitCreated,
+}: {
+  onSplitCreated?: () => void;
+}) {
+  const [occasionName, setOccasionName] = useState("");
+  const [total, setTotal] = useState("");
+  const [user, setUser] = useState<any>(null);
+  const [friends, setFriends] = useState<any[]>([]);
+  const [selectedFriends, setSelectedFriends] = useState<
+    {
+      id: string;
+      full_name: string;
+      username: string;
+      shareAmount: number;
+      shareAmountInput: string;
+    }[]
+  >([]);
+  const [showFriends, setShowFriends] = useState(false);
+  const [userShareAmount, setUserShareAmount] = useState(0);
+
+  useEffect(() => {
+    async function loadUser() {
+      const {
+        data: { user },
+        error,
+      } = await supabase.auth.getUser();
+
+      if (error) {
+        console.error("Error loading user:", error.message);
+        return;
+      }
+
+      setUser(user);
+
+      // Load friends - TODO: replace with actual friends data
+      const { data: friendsData, error: friendsError } = await supabase
+        .from("friends")
+        .select(
+          `
+          id,
+          user_id,
+          friend_id,
+          profiles:friend_id ( id, full_name, username )
+        `,
+        )
+        .eq("user_id", user?.id || ""); // fallback if user is null
+
+      if (friendsError) {
+        console.error("Error fetching friends:", friendsError);
+        return;
+      }
+
+      setFriends(friendsData);
+    }
+
+    loadUser();
+  }, []);
+
+  async function handleCreateSplit() {
+    try {
+      const trimmedTitle = occasionName.trim();
+      const trimmedTotal = total.trim();
+      const amount = parseFloat(trimmedTotal);
+      const totalPeople = selectedFriends.length + 1;
+      // Derived value: split per person
+      const splitAmount = selectedFriends.length
+        ? parseFloat(total || "0") / (selectedFriends.length + 1) // +1 for current user
+        : 0;
+      const splitPercentage = 100 / totalPeople;
+
+      if (!trimmedTitle || !trimmedTotal || !user) {
+        console.log("Missing data");
+        return;
+      }
+
+      if (isNaN(amount) || amount <= 0) {
+        console.log("Invalid amount");
+        return;
+      }
+
+      await createSplit({
+        title: trimmedTitle,
+        totalAmount: amount,
+        members: [
+          {
+            profileId: user.id,
+            sharePercentage: splitPercentage,
+            shareAmount:
+              amount -
+              selectedFriends.reduce(
+                (sum, f) => sum + (parseFloat(f.shareAmountInput) || 0),
+                0,
+              ), // ensure creator's share is total minus sum of friends' shares
+          },
+          ...selectedFriends.map((f) => ({
+            profileId: f.id,
+            sharePercentage:
+              ((parseFloat(f.shareAmountInput) || 0) / amount) * 100 || 0,
+            shareAmount: parseFloat(f.shareAmountInput) || 0,
+          })),
+        ],
+      });
+
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert("Split Created", "Your split has been created successfully!");
+
+      if (onSplitCreated) onSplitCreated();
+      // clear the form after success
+      setOccasionName("");
+      setTotal("");
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.container}>
-        {/* Title */}
-        <Text style={styles.title}>Create New Split</Text>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaView style={styles.safeArea}>
+        <ScrollView contentContainerStyle={styles.container}>
+          {/* Title */}
+          <Text style={styles.title}>Create New Split</Text>
 
-        {/* Occasion Name */}
-        <View style={styles.section}>
-          <Text style={styles.label}>Occasion Name</Text>
-          <TextInput
-            placeholder="e.g. Vegas Trip, Dinner"
-            style={styles.input}
-          />
-        </View>
-
-        {/* Total Amount */}
-        <View style={styles.section}>
-          <Text style={styles.label}>Total Amount</Text>
-          <View style={styles.amountContainer}>
-            <Text style={styles.amountDollar}>$</Text>
+          {/* Occasion Name */}
+          <View style={styles.section}>
+            <Text style={styles.label}>Occasion Name</Text>
             <TextInput
-              placeholder="0.00"
-              keyboardType="numeric"
-              style={styles.amountInput}
+              placeholder="e.g. Vegas Trip, Dinner"
+              style={styles.input}
+              value={occasionName}
+              onChangeText={setOccasionName}
             />
           </View>
-        </View>
 
-        {/* Split With Friends */}
-        <View style={styles.section}>
-          <View style={styles.splitHeader}>
-            <Text style={styles.label}>Split With Friends</Text>
-            <View style={styles.splitEvenly}>
-              <Percent size={14} color="#8b16a3ff" />
-              <Text style={styles.splitText}>Split Evenly</Text>
+          {/* Total Amount */}
+          <View style={styles.section}>
+            <Text style={styles.label}>Total Amount</Text>
+            <View style={styles.amountContainer}>
+              <Text style={styles.amountDollar}>$</Text>
+              <TextInput
+                placeholder="0.00"
+                keyboardType="numeric"
+                style={styles.amountInput}
+                value={total}
+                onChangeText={setTotal}
+              />
             </View>
           </View>
 
-          {/* Friend Card (static) */}
-          <View style={styles.friendCard}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.friendName}>Audrey Saidel</Text>
-              <Text style={styles.friendHandle}>@audrey_s</Text>
+          {/* Split With Friends */}
+          <View style={styles.section}>
+            <View style={styles.splitHeader}>
+              <Text style={styles.label}>Split With Friends</Text>
+              <Pressable
+                style={styles.splitEvenly}
+                onPress={() => {
+                  // Calculate each person's share (including the creator)
+                  const totalAmount = parseFloat(total || "0");
+                  const perPerson =
+                    selectedFriends.length > 0
+                      ? totalAmount / (selectedFriends.length + 1)
+                      : totalAmount;
+
+                  // Update each friend's share amount
+                  setSelectedFriends((prev) =>
+                    prev.map((f) => ({
+                      ...f,
+                      shareAmount: perPerson,
+                      shareAmountInput: perPerson.toFixed(2),
+                    })),
+                  );
+
+                  // Optionally track creator's share
+                  setUserShareAmount(perPerson);
+                }}
+              >
+                <Percent size={14} color="#8b16a3ff" />
+                <Text style={styles.splitText}>Split Evenly</Text>
+              </Pressable>
             </View>
+            {/* Selected Friends */}
+            {selectedFriends.map((friend) => (
+              <Swipeable
+                key={friend.id}
+                renderRightActions={() => (
+                  <Pressable
+                    onPress={() =>
+                      setSelectedFriends((prev) =>
+                        prev.filter((f) => f.id !== friend.id),
+                      )
+                    }
+                    style={{
+                      backgroundColor: "#ef4444",
+                      justifyContent: "center",
+                      alignItems: "center",
+                      width: 80,
+                      marginVertical: 8,
+                      borderRadius: 8,
+                    }}
+                  >
+                    <Text style={{ color: "#fff", fontWeight: "600" }}>
+                      Delete
+                    </Text>
+                  </Pressable>
+                )}
+              >
+                <View style={styles.friendCard}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.friendName}>{friend.full_name}</Text>
+                    <Text style={styles.friendHandle}>@{friend.username}</Text>
+                  </View>
 
-            <View style={styles.friendSplit}>
-              <View style={styles.percentageBox}>
-                <Text style={styles.percentageText}>50</Text>
-              </View>
-              <Text style={styles.percentageSign}>%</Text>
-              <Text style={styles.amountText}>$45.00</Text>
+                  <View style={styles.friendSplit}>
+                    <TextInput
+                      style={styles.amountText}
+                      keyboardType="decimal-pad"
+                      value={friend.shareAmountInput}
+                      onChangeText={(val) => {
+                        const num = parseFloat(val) || 0;
+
+                        setSelectedFriends((prev) =>
+                          prev.map((f) =>
+                            f.id === friend.id
+                              ? { ...f, shareAmountInput: val }
+                              : f,
+                          ),
+                        );
+                      }}
+                    />
+                  </View>
+                </View>
+              </Swipeable>
+            ))}
+          </View>
+
+          {/* Progress Bar */}
+          <View style={styles.section}>
+            <View style={styles.progressHeader}>
+              <Text style={styles.label}>Total</Text>
+              <Text style={styles.progressText}>100%</Text>
             </View>
-
-            <Pressable style={{ marginLeft: 8 }}>
-              <X size={20} color="#9ca3af" />
-            </Pressable>
+            <View style={styles.progressBar}>
+              <View style={styles.progressFill} />
+            </View>
           </View>
-        </View>
 
-        {/* Progress Bar */}
-        <View style={styles.section}>
-          <View style={styles.progressHeader}>
-            <Text style={styles.label}>Total</Text>
-            <Text style={styles.progressText}>100%</Text>
-          </View>
-          <View style={styles.progressBar}>
-            <View style={styles.progressFill} />
-          </View>
-        </View>
+          {/* Add Friend Button */}
+          <Pressable
+            style={styles.addFriendButton}
+            onPress={() => setShowFriends(!showFriends)}
+          >
+            <Plus size={16} color="#6b7280" />
+            <Text style={styles.addFriendText}>Add Friend</Text>
+          </Pressable>
 
-        {/* Add Friend Button */}
-        <Pressable style={styles.addFriendButton}>
-          <Plus size={16} color="#6b7280" />
-          <Text style={styles.addFriendText}>Add Friend</Text>
-        </Pressable>
+          {/* Friend Picker */}
+          {showFriends && (
+            <>
+              {friends.length === 0 ? (
+                <View style={{ padding: 12, alignItems: "center" }}>
+                  <Text
+                    style={{
+                      color: "#6b7280",
+                      fontSize: 14,
+                      textAlign: "center",
+                    }}
+                  >
+                    You have no friends yet. Add some now!
+                  </Text>
+                </View>
+              ) : (
+                friends.map((f) => {
+                  const friendProfile = f.profiles;
 
-        {/* Create Button */}
-        <Pressable style={styles.createButton}>
-          <Text style={styles.createButtonText}>Create Split</Text>
-        </Pressable>
-      </ScrollView>
-    </SafeAreaView>
+                  return (
+                    <Pressable
+                      key={f.id}
+                      style={styles.friendCard}
+                      onPress={() => {
+                        if (
+                          selectedFriends.find(
+                            (sf) => sf.id === friendProfile.id,
+                          )
+                        )
+                          return;
+                        setSelectedFriends((prev) => [
+                          ...prev,
+                          {
+                            ...friendProfile,
+                            shareAmount: 0,
+                            shareAmountInput: "0.00",
+                          },
+                        ]);
+                      }}
+                    >
+                      <View>
+                        <Text style={styles.friendName}>
+                          {friendProfile.full_name}
+                        </Text>
+                        <Text style={styles.friendHandle}>
+                          @{friendProfile.username}
+                        </Text>
+                      </View>
+                    </Pressable>
+                  );
+                })
+              )}
+            </>
+          )}
+
+          {/* Create Button */}
+          <Pressable style={styles.createButton} onPress={handleCreateSplit}>
+            <Text style={styles.createButtonText}>Create Split</Text>
+          </Pressable>
+        </ScrollView>
+      </SafeAreaView>
+    </GestureHandlerRootView>
   );
 }
 
