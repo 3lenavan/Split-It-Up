@@ -35,7 +35,15 @@ export default function AddScreen({
   const [total, setTotal] = useState("");
   const [user, setUser] = useState<any>(null);
   const [friends, setFriends] = useState<any[]>([]);
-  const [selectedFriends, setSelectedFriends] = useState<any[]>([]);
+  const [selectedFriends, setSelectedFriends] = useState<
+    {
+      id: string;
+      full_name: string;
+      username: string;
+      shareAmount: number;
+      shareAmountInput: string;
+    }[]
+  >([]);
   const [showFriends, setShowFriends] = useState(false);
   const [userShareAmount, setUserShareAmount] = useState(0);
 
@@ -106,12 +114,18 @@ export default function AddScreen({
           {
             profileId: user.id,
             sharePercentage: splitPercentage,
-            shareAmount: splitAmount,
+            shareAmount:
+              amount -
+              selectedFriends.reduce(
+                (sum, f) => sum + (parseFloat(f.shareAmountInput) || 0),
+                0,
+              ), // ensure creator's share is total minus sum of friends' shares
           },
           ...selectedFriends.map((f) => ({
             profileId: f.id,
-            sharePercentage: splitPercentage,
-            shareAmount: splitAmount,
+            sharePercentage:
+              ((parseFloat(f.shareAmountInput) || 0) / amount) * 100 || 0,
+            shareAmount: parseFloat(f.shareAmountInput) || 0,
           })),
         ],
       });
@@ -177,7 +191,11 @@ export default function AddScreen({
 
                   // Update each friend's share amount
                   setSelectedFriends((prev) =>
-                    prev.map((f) => ({ ...f, shareAmount: perPerson })),
+                    prev.map((f) => ({
+                      ...f,
+                      shareAmount: perPerson,
+                      shareAmountInput: perPerson.toFixed(2),
+                    })),
                   );
 
                   // Optionally track creator's share
@@ -221,9 +239,22 @@ export default function AddScreen({
                   </View>
 
                   <View style={styles.friendSplit}>
-                    <Text style={styles.amountText}>
-                      ${friend.shareAmount?.toFixed(2) || "0.00"}
-                    </Text>
+                    <TextInput
+                      style={styles.amountText}
+                      keyboardType="decimal-pad"
+                      value={friend.shareAmountInput}
+                      onChangeText={(val) => {
+                        const num = parseFloat(val) || 0;
+
+                        setSelectedFriends((prev) =>
+                          prev.map((f) =>
+                            f.id === friend.id
+                              ? { ...f, shareAmountInput: val }
+                              : f,
+                          ),
+                        );
+                      }}
+                    />
                   </View>
                 </View>
               </Swipeable>
@@ -280,7 +311,14 @@ export default function AddScreen({
                           )
                         )
                           return;
-                        setSelectedFriends((prev) => [...prev, friendProfile]);
+                        setSelectedFriends((prev) => [
+                          ...prev,
+                          {
+                            ...friendProfile,
+                            shareAmount: 0,
+                            shareAmountInput: "0.00",
+                          },
+                        ]);
                       }}
                     >
                       <View>
