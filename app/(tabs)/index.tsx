@@ -6,6 +6,7 @@
  * TO::DO - Integrate with backend to fetch real splits data and display them.
  *******************************************************************************/
 import { supabase } from "@/lib/supabaseClient";
+import { useIsFocused } from "@react-navigation/native";
 import { Edit2, Trash2 } from "lucide-react-native";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -34,6 +35,19 @@ type Split = {
   creator_id: string;
   myBalance: number;
   friends: Friend[];
+};
+type EditableMember = {
+  id: string;
+  full_name: string;
+  username: string;
+  shareAmount: number;
+  shareAmountInput: string;
+};
+
+type AvailableFriend = {
+  id: string;
+  full_name: string;
+  username: string;
 };
 
 type SplitCardProps = {
@@ -96,45 +110,43 @@ function SplitCard({ split, onMenuOpen, onDelete }: SplitCardProps) {
           </Pressable>
         </View>
 
-        {hasFriends ? (
-          <View style={styles.cardBalances}>
-            {owedToYou > 0 && (
-              <View style={styles.balanceBlock}>
-                <Text style={styles.balanceLabel}>You're owed</Text>
-                <Text style={[styles.balanceValue, styles.positive]}>
-                  +${owedToYou.toFixed(2)}
-                </Text>
-              </View>
-            )}
-            {youOwe > 0 && (
-              <View style={styles.balanceBlock}>
-                <Text style={styles.balanceLabel}>You owe</Text>
-                <Text style={[styles.balanceValue, styles.negative]}>
-                  -${youOwe.toFixed(2)}
-                </Text>
-              </View>
-            )}
-            <View style={styles.balanceBlock}>
-              <Text style={styles.balanceLabel}>Total</Text>
-              <Text style={styles.balanceValue}>
-                ${Number(split.total_amount).toFixed(2)}
-              </Text>
-            </View>
+        <View style={styles.cardBalances}>
+          <View style={styles.balanceBlock}>
+            <Text style={styles.balanceLabel}>Status</Text>
+            <Text
+              style={[
+                styles.balanceValue,
+                owedToYou > 0
+                  ? styles.positive
+                  : youOwe > 0
+                    ? styles.negative
+                    : undefined,
+              ]}
+            >
+              {!hasFriends
+                ? "Just you"
+                : owedToYou > 0
+                  ? "Owed back"
+                  : youOwe > 0
+                    ? "You owe"
+                    : "Settled"}
+            </Text>
           </View>
-        ) : (
-          <View style={styles.cardBalances}>
-            <View style={styles.balanceBlock}>
-              <Text style={styles.balanceLabel}>Total</Text>
-              <Text style={styles.balanceValue}>
-                ${Number(split.total_amount).toFixed(2)}
-              </Text>
-            </View>
-            <View style={styles.balanceBlock}>
-              <Text style={styles.balanceLabel}>Status</Text>
-              <Text style={styles.balanceValue}>Just you</Text>
-            </View>
+
+          <View style={styles.balanceBlock}>
+            <Text style={styles.balanceLabel}>Your Share</Text>
+            <Text style={styles.balanceValue}>
+              ${Math.abs(split.myBalance).toFixed(2)}
+            </Text>
           </View>
-        )}
+
+          <View style={styles.balanceBlock}>
+            <Text style={styles.balanceLabel}>Total</Text>
+            <Text style={styles.balanceValue}>
+              ${Number(split.total_amount).toFixed(2)}
+            </Text>
+          </View>
+        </View>
 
         {hasFriends && (
           <View style={styles.cardFriends}>
@@ -167,6 +179,7 @@ export default function HomeScreen() {
   // Define the Split type to match the structure of the splits data from the backend
 
   const [splits, setSplits] = useState<Split[]>([]);
+  const isFocused = useIsFocused();
   const [loading, setLoading] = useState(true);
   const [selectedSplit, setSelectedSplit] = useState<Split | null>(null);
   const [actionMenuVisible, setActionMenuVisible] = useState(false);
@@ -176,74 +189,106 @@ export default function HomeScreen() {
   const [editTotal, setEditTotal] = useState("");
   const [isSaving, setIsSaving] = useState(false);
 
-  useEffect(() => {
-    /****
-     * Name: loadSplits
-     * Description: Fetches splits data for the authenticated user
-     * from Supabase and sets it in state.
-     */
-    const loadSplits = async () => {
-      const {
-        data: { session },
-        error: authError,
-      } = await supabase.auth.getSession();
-      const user = session?.user;
+  const [editMembers, setEditMembers] = useState<EditableMember[]>([]);
+  const [availableFriends, setAvailableFriends] = useState<AvailableFriend[]>(
+    [],
+  );
+  const [loadingEditData, setLoadingEditData] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  /****
+   * Name: loadSplits
+   * Description: Fetches splits data for the authenticated user
+   * from Supabase and sets it in state.
+   */
+  const loadSplits = async () => {
+    setLoading(true);
+    const {
+      data: { session },
+      error: authError,
+    } = await supabase.auth.getSession();
+    const user = session?.user;
 
-      if (!user) {
-        console.log("No user session yet");
-        setLoading(false);
-        return;
-      }
-      if (authError) {
-        // if theres an authentication error or not a user
-        console.error("Error fetching user:", authError);
-        setLoading(false);
-        return;
-      }
-      // query supabase for splits that the user is a member of, and get the split details
-      // store in data variable. The query uses a join to get the split details from the splits table based on the split_id in the split_members table, and filters by the current user's profile_id.
-      const { data, error } = await supabase
-        .from("split_members")
-        .select(
-          `share_amount, splits(id, title, total_amount, created_at, creator_id, split_members (share_amount,profile_id,profiles (id,full_name)))`,
-        )
-        .eq("profile_id", user.id);
-      console.log("SPLITS DATA:", data);
-      console.log("SESSION USER:", user?.id);
-      // if theres an error fetching the splits, log it. Otherwise, format the data to extract the splits and set it in state
-      if (error) {
-        console.error("Error fetching splits:", error);
-        setLoading(false);
-        return;
-      }
-
-      const formatted = (data ?? []).map((item) => {
-        const split = item.splits as any;
-
-        const myShareAmount = item.share_amount ?? 0;
-        const friends: Friend[] = (split.split_members ?? [])
-          .filter((m: any) => m.profile_id !== user.id)
-          .map((m: any) => ({
-            id: m.profile_id,
-            name: m.profiles?.full_name ?? "Unknown",
-            balance: m.share_amount ?? 0,
-          }));
-
-        return {
-          id: split.id,
-          title: split.title,
-          total_amount: split.total_amount,
-          created_at: split.created_at,
-          creator_id: split.creator_id,
-          myBalance: myShareAmount,
-          friends,
-        };
-      });
-      setSplits(formatted);
+    if (!user) {
+      console.log("No user session yet");
       setLoading(false);
-    };
+      return;
+    }
+    if (authError) {
+      // if theres an authentication error or not a user
+      console.error("Error fetching user:", authError);
+      setLoading(false);
+      return;
+    }
+    setCurrentUserId(user.id);
+
+    // query supabase for splits that the user is a member of, and get the split details
+    // store in data variable. The query uses a join to get the split details from the splits table based on the split_id in the split_members table, and filters by the current user's profile_id.
+    const { data, error } = await supabase
+      .from("splits")
+      .select(
+        `
+    id,
+    title,
+    total_amount,
+    created_at,
+    creator_id,
+    my_membership:split_members!inner(
+      profile_id,
+      share_amount
+    ),
+    all_members:split_members(
+      profile_id,
+      share_amount,
+      profiles(
+        id,
+        full_name
+      )
+    )
+  `,
+      )
+      .eq("my_membership.profile_id", user.id);
+    console.log("SPLITS DATA:", JSON.stringify(data, null, 2));
+    console.log("SESSION USER:", user?.id);
+    // if theres an error fetching the splits, log it. Otherwise, format the data to extract the splits and set it in state
+    if (error) {
+      console.error("Error fetching splits:", error);
+      setLoading(false);
+      return;
+    }
+
+    const formatted: Split[] = (data ?? []).map((split: any) => {
+      const myRow = Array.isArray(split.my_membership)
+        ? split.my_membership[0]
+        : split.my_membership;
+
+      const myShareAmount = myRow?.share_amount ?? 0;
+
+      const friends: Friend[] = (split.all_members ?? [])
+        .filter((m: any) => m.profile_id !== user.id)
+        .map((m: any) => ({
+          id: m.profile_id,
+          name: m.profiles?.full_name ?? "Unknown",
+          balance: m.share_amount ?? 0,
+        }));
+      return {
+        id: split.id,
+        title: split.title,
+        total_amount: split.total_amount,
+        created_at: split.created_at,
+        creator_id: split.creator_id,
+        myBalance: myShareAmount,
+        friends,
+      };
+    });
+    console.log("FORMATTED SPLITS:", formatted);
+    setSplits(formatted);
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    if (!isFocused) return;
     loadSplits();
-  }, []);
+  }, [isFocused]);
 
   const openActionMenu = (split: Split, position: { x: number; y: number }) => {
     setSelectedSplit(split);
@@ -255,26 +300,114 @@ export default function HomeScreen() {
     setActionMenuVisible(false);
   };
 
-  const openEditModal = () => {
+  const openEditModal = async () => {
     if (!selectedSplit) return;
+
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+    if (userError || !user) {
+      Alert.alert("Error", "Could not load user.");
+      return;
+    }
+
+    if (selectedSplit.creator_id !== user.id) {
+      Alert.alert(
+        "Can't edit",
+        "Only the person who created this split can edit it.",
+      );
+      return;
+    }
 
     setEditTitle(selectedSplit.title);
     setEditTotal(String(selectedSplit.total_amount));
-
+    setEditMembers([]);
+    setAvailableFriends([]);
+    setLoadingEditData(true);
     setActionMenuVisible(false);
     setEditModalVisible(true);
+
+    try {
+      const { data: memberRows, error: memberError } = await supabase
+        .from("split_members")
+        .select(`profile_id, share_amount, profiles (id, full_name, username)`)
+        .eq("split_id", selectedSplit.id);
+      console.log("EDIT MEMBER ROWS:", JSON.stringify(memberRows, null, 2));
+
+      if (memberError)
+        console.error("Error fetching split members:", memberError);
+
+      const { data: friendRows, error: friendError } = await supabase
+        .from("friends")
+        .select(
+          `id, user_id, friend_id, profiles:friend_id (id, full_name, username)`,
+        )
+        .eq("user_id", user.id);
+
+      if (friendError) console.error("Error fetching friends:", friendError);
+
+      const prefilledMembers: EditableMember[] = (memberRows ?? [])
+        .filter((m: any) => m.profile_id !== user.id)
+        .map((m: any) => {
+          const profile = m.profiles as any;
+          const amount = m.share_amount ?? 0;
+          return {
+            id: profile?.id ?? m.profile_id,
+            full_name: profile?.full_name ?? "Unknown",
+            username: profile?.username ?? "",
+            shareAmount: amount,
+            shareAmountInput: amount.toFixed(2),
+          };
+        });
+
+      const friends: AvailableFriend[] = (friendRows ?? [])
+        .map((f: any) => {
+          const fp = f.profiles as any;
+          return {
+            id: fp?.id ?? f.friend_id,
+            full_name: fp?.full_name ?? "Unknown",
+            username: fp?.username ?? "",
+          };
+        })
+        .filter((f) => !prefilledMembers.some((m) => m.id === f.id));
+
+      setEditMembers(prefilledMembers);
+      setAvailableFriends(friends);
+    } finally {
+      setLoadingEditData(false);
+    }
   };
 
   const closeEditModal = () => {
     setEditModalVisible(false);
     setEditTitle("");
     setEditTotal("");
+    setEditMembers([]);
+    setAvailableFriends([]);
   };
   const saveSplitEdits = async () => {
-    if (!selectedSplit) return;
+    if (!selectedSplit || !currentUserId) return;
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError || !user) {
+      Alert.alert("Error", "Could not verify user.");
+      return;
+    }
+
+    if (selectedSplit.creator_id !== user.id) {
+      Alert.alert(
+        "Can't edit",
+        "Only the person who created this split can edit it.",
+      );
+      return;
+    }
 
     const parsedTotal = Number(editTotal);
-    if (!editTitle.trim() || Number.isNaN(parsedTotal)) {
+    if (!editTitle.trim() || Number.isNaN(parsedTotal) || parsedTotal <= 0) {
       Alert.alert("Invalid input", "Please enter a valid name and amount.");
       return;
     }
@@ -294,20 +427,97 @@ export default function HomeScreen() {
         Alert.alert("Error", "Could not save changes. Please try again.");
         return;
       }
+      const memberRows = [
+        {
+          split_id: selectedSplit.id,
+          profile_id: currentUserId,
+          share_percentage:
+            parsedTotal > 0 ? (creatorShare / parsedTotal) * 100 : 0,
+          share_amount: creatorShare,
+        },
+        ...editMembers.map((m) => ({
+          split_id: selectedSplit.id,
+          profile_id: m.id,
+          share_percentage:
+            parsedTotal > 0
+              ? ((parseFloat(m.shareAmountInput) || 0) / parsedTotal) * 100
+              : 0,
+          share_amount: parseFloat(m.shareAmountInput) || 0,
+        })),
+      ];
+      const { error: memberError } = await supabase
+        .from("split_members")
+        .upsert(memberRows, { onConflict: "split_id,profile_id" });
 
-      setSplits((prev) =>
-        prev.map((split) =>
-          split.id === selectedSplit.id
-            ? { ...split, title: editTitle.trim(), total_amount: parsedTotal }
-            : split,
-        ),
-      );
+      if (memberError) {
+        console.error("Error upserting split members:", memberError);
+        Alert.alert(
+          "Partial save",
+          "Split details saved but members could not be updated.",
+        );
+      }
 
+      await loadSplits();
       closeEditModal();
+      setSelectedSplit(null);
     } finally {
       setIsSaving(false);
     }
   };
+  const addMemberToEdit = (friend: AvailableFriend) => {
+    setEditMembers((prev) => [
+      ...prev,
+      {
+        id: friend.id,
+        full_name: friend.full_name,
+        username: friend.username,
+        shareAmount: 0,
+        shareAmountInput: "0.00",
+      },
+    ]);
+    setAvailableFriends((prev) => prev.filter((f) => f.id !== friend.id));
+  };
+
+  const removeMemberFromEdit = (memberId: string) => {
+    const removing = editMembers.find((m) => m.id === memberId);
+    setEditMembers((prev) => prev.filter((m) => m.id !== memberId));
+    if (removing) {
+      setAvailableFriends((prev) => [
+        ...prev,
+        {
+          id: removing.id,
+          full_name: removing.full_name,
+          username: removing.username,
+        },
+      ]);
+    }
+  };
+
+  const updateMemberShare = (memberId: string, value: string) => {
+    setEditMembers((prev) =>
+      prev.map((m) =>
+        m.id === memberId
+          ? {
+              ...m,
+              shareAmountInput: value,
+              shareAmount: parseFloat(value) || 0,
+            }
+          : m,
+      ),
+    );
+  };
+
+  const totalAmount = parseFloat(editTotal) || 0;
+  const allocated = editMembers.reduce(
+    (sum, m) => sum + (parseFloat(m.shareAmountInput) || 0),
+    0,
+  );
+  const creatorShare = Math.max(0, totalAmount - allocated);
+  const totalPeople = editMembers.length + 1;
+  const progressPct =
+    totalAmount > 0 ? Math.min(allocated / totalAmount, 1) : 0;
+  const isComplete =
+    totalAmount > 0 && Math.abs(allocated - totalAmount) < 0.01;
 
   const deleteSplit = async (splitToDelete?: Split) => {
     const targetSplit = splitToDelete ?? selectedSplit;
@@ -443,15 +653,103 @@ export default function HomeScreen() {
               onChangeText={setEditTitle}
               placeholder="Enter split name"
             />
+            {totalAmount > 0 && (
+              <View style={{ marginTop: 12 }}>
+                <Text style={{ fontSize: 12, color: "#6b7280" }}>
+                  Allocated ${allocated.toFixed(2)} of ${totalAmount.toFixed(2)}
+                </Text>
+                <Text style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
+                  Your share: ${creatorShare.toFixed(2)}
+                </Text>
+              </View>
+            )}
 
-            <Text style={styles.inputLabel}>Total Amount</Text>
-            <TextInput
-              style={styles.input}
-              value={editTotal}
-              onChangeText={setEditTotal}
-              placeholder="Enter total amount"
-              keyboardType="numeric"
-            />
+            {loadingEditData ? (
+              <Text style={{ marginTop: 16, color: "#6b7280" }}>
+                Loading members...
+              </Text>
+            ) : (
+              <>
+                {editMembers.length > 0 && (
+                  <>
+                    <Text style={styles.inputLabel}>Members</Text>
+                    {editMembers.map((member) => (
+                      <View
+                        key={member.id}
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 8,
+                          marginBottom: 10,
+                        }}
+                      >
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ fontSize: 14, fontWeight: "500" }}>
+                            {member.full_name}
+                          </Text>
+                          {!!member.username && (
+                            <Text style={{ fontSize: 12, color: "#6b7280" }}>
+                              @{member.username}
+                            </Text>
+                          )}
+                        </View>
+
+                        <TextInput
+                          style={[
+                            styles.input,
+                            { width: 90, paddingVertical: 8 },
+                          ]}
+                          value={member.shareAmountInput}
+                          onChangeText={(val) =>
+                            updateMemberShare(member.id, val)
+                          }
+                          keyboardType="decimal-pad"
+                          placeholder="0.00"
+                        />
+
+                        <Pressable
+                          onPress={() => removeMemberFromEdit(member.id)}
+                        >
+                          <Text style={{ color: "#dc2626", fontWeight: "600" }}>
+                            Remove
+                          </Text>
+                        </Pressable>
+                      </View>
+                    ))}
+                  </>
+                )}
+
+                {availableFriends.length > 0 && (
+                  <>
+                    <Text style={styles.inputLabel}>Add Friends</Text>
+                    <View
+                      style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}
+                    >
+                      {availableFriends.map((friend) => (
+                        <Pressable
+                          key={friend.id}
+                          onPress={() => addMemberToEdit(friend)}
+                          style={{
+                            backgroundColor: "#f3f4f6",
+                            borderRadius: 16,
+                            paddingHorizontal: 10,
+                            paddingVertical: 6,
+                          }}
+                        >
+                          <Text>{friend.full_name} +</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  </>
+                )}
+
+                {availableFriends.length === 0 && editMembers.length === 0 && (
+                  <Text style={{ marginTop: 16, color: "#6b7280" }}>
+                    Add friends from the Profile tab to split with them.
+                  </Text>
+                )}
+              </>
+            )}
 
             <View style={styles.modalButtons}>
               <Pressable style={styles.cancelButton} onPress={closeEditModal}>
