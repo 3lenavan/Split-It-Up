@@ -8,7 +8,7 @@
 
 import { supabase } from "@/lib/supabaseClient";
 import { router } from "expo-router";
-import { Check, LogOut, Search, UserPlus } from "lucide-react-native";
+import { Check, LogOut, Search, UserPlus, X } from "lucide-react-native";
 import {
   Alert,
   Pressable,
@@ -20,7 +20,6 @@ import {
 } from "react-native";
 import { useEffect, useState } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
-
 
 // Profile Screen Component
 export default function ProfileScreen() {
@@ -39,6 +38,10 @@ export default function ProfileScreen() {
   const [pendingRequests, setPendingRequests] = useState<any[]>([]);
 
   const [searchResults, setSearchResults] = useState<any[]>([]);
+
+  const [youreOwed, setYoureOwed] = useState(0);
+  
+  const [youOwe, setYouOwe] = useState(0);
 
   const loadProfile = async () => {
   const {
@@ -175,11 +178,64 @@ const loadFriends = async () => {
   setFriends(formatted);
 };
 
+const loadBalances = async () => {
+  const {
+    data: { session },
+    error: sessionError,
+  } = await supabase.auth.getSession();
+
+  const currentUserId = session?.user?.id;
+
+  if (!currentUserId) return;
+
+  if (sessionError) {
+    console.error("Error getting session for balances:", sessionError);
+    return;
+  }
+
+  const { data, error } = await supabase
+    .from("splits")
+    .select(`
+      id,
+      my_membership:split_members!inner(
+        profile_id,
+        share_amount
+      )
+    `)
+    .eq("my_membership.profile_id", currentUserId);
+
+  if (error) {
+    console.error("Error loading balances:", error);
+    return;
+  }
+
+  let owedTotal = 0;
+  let oweTotal = 0;
+
+  (data ?? []).forEach((split: any) => {
+    const myRow = Array.isArray(split.my_membership)
+      ? split.my_membership[0]
+      : split.my_membership;
+
+    const myBalance = Number(myRow?.share_amount ?? 0);
+
+    if (myBalance > 0) {
+      owedTotal += myBalance;
+    } else if (myBalance < 0) {
+      oweTotal += Math.abs(myBalance);
+    }
+  });
+
+  setYoureOwed(owedTotal);
+  setYouOwe(oweTotal);
+};
+
 useEffect(() => {
   loadProfile();
   loadPendingRequests();
   loadSentRequests();
   loadFriends();
+  loadBalances();
 }, []);
 
   const handleSearch = async () => {
@@ -396,12 +452,16 @@ const handleLogout = async () => {
             <Text style={styles.statLabel}>Friends</Text>
           </View>
           <View style={styles.statBlock}>
-            <Text style={[styles.statValue, { color: "#16a34a" }]}>$0</Text>
-            <Text style={styles.statLabel}>You're owed</Text>
+            <Text style={[styles.statValue, { color: "#16a34a" }]}>
+              ${youreOwed.toFixed(2)}
+            </Text>
+<Text style={styles.statLabel}>You're owed</Text>
           </View>
           <View style={styles.statBlock}>
-            <Text style={[styles.statValue, { color: "#dc2626" }]}>$0</Text>
-            <Text style={styles.statLabel}>You owe</Text>
+            <Text style={[styles.statValue, { color: "#dc2626" }]}>
+         ${youOwe.toFixed(2)}
+        </Text>
+<Text style={styles.statLabel}>You owe</Text>
           </View>
         </View>
 
@@ -409,21 +469,47 @@ const handleLogout = async () => {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Add New Friend</Text>
           <View style={styles.searchBox}>
-            <Search size={18} color="#9ca3af" style={styles.searchIcon} />
-            <TextInput
-  style={styles.searchInput}
-  placeholder="Search by username"
-  placeholderTextColor="#9ca3af"
-  value={searchText}
-  onChangeText={setSearchText}
-/>
-            <Pressable style={styles.searchButton} onPress={handleSearch}>
-              <Text style={styles.searchButtonText}>Search</Text>
-            </Pressable>
-          </View>
+  <Search size={18} color="#9ca3af" style={styles.searchIcon} />
+
+  <TextInput
+    style={styles.searchInput}
+    placeholder="Search by username"
+    placeholderTextColor="#9ca3af"
+    value={searchText}
+    onChangeText={(text) => {
+      setSearchText(text);
+
+      if (text.trim() === "") {
+        setSearchResults([]);
+      }
+    }}
+  />
+
+  {searchText.length > 0 && (
+    <Pressable
+      style={styles.clearButton}
+      onPress={() => {
+        setSearchText("");
+        setSearchResults([]);
+      }}
+    >
+      <X size={16} color="#9ca3af" />
+    </Pressable>
+  )}
+
+  <Pressable style={styles.searchButton} onPress={handleSearch}>
+    <Text style={styles.searchButtonText}>Search</Text>
+  </Pressable>
+</View>
 
           {/* Search Results */}
 <Text>Results found: {searchResults.length}</Text>
+
+{searchText.trim() !== '' && searchResults.length === 0 && (
+  <Text style={{ color: 'gray', textAlign: 'center', marginTop: 10 }}>
+    No users found
+  </Text>
+)}
 
 {searchResults.map((user) => (
   <View key={user.id} style={styles.resultCard}>
@@ -529,6 +615,13 @@ const handleLogout = async () => {
 const styles = StyleSheet.create({
   requestActions: {
   flexDirection: "row",
+},
+
+clearButton: {
+  padding: 6,
+  marginLeft: 4,
+  borderRadius: 20,
+  backgroundColor: "#f3f4f6",
 },
 
 acceptButton: {
