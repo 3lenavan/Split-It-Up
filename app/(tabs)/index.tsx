@@ -4,53 +4,37 @@
  * Smooth entrance animations, glowing cards, animated balance summary.
  *****************************************************************************/
 import { supabase } from "@/lib/supabaseClient";
+import { THEME_PALETTES, useAppTheme } from "@/lib/app-theme";
 import { useIsFocused } from "@react-navigation/native";
 import { Edit2, Receipt, Sparkles, Trash2, TrendingUp, Users } from "lucide-react-native";
 import { useEffect, useRef, useState } from "react";
 import {
   Alert,
   Animated,
+  Keyboard,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
+  TouchableWithoutFeedback,
   View,
 } from "react-native";
 import { Swipeable } from "react-native-gesture-handler";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 // ── Palette ───────────────────────────────────────────────────────────────────
-const C = {
-  bg: "#07070f",
-  surface: "#0f0f1a",
-  card: "#141420",
-  cardBright: "#1c1c2e",
-  border: "#252538",
-  borderBright: "#353550",
-  accent: "#a855f7",
-  accentDim: "#a855f730",
-  accentBright: "#d8b4fe",
-  accentDeep: "#7c3aed",
-  green: "#22d3a5",
-  greenDim: "#22d3a518",
-  red: "#f43f5e",
-  redDim: "#f43f5e18",
-  amber: "#fbbf24",
-  amberDim: "#fbbf2418",
-  blue: "#38bdf8",
-  blueDim: "#38bdf818",
-  textPrimary: "#f0eeff",
-  textSecondary: "#7c7c9e",
-  textMuted: "#3a3a52",
-};
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type Friend = { id: string; name: string; balance: number };
 type Split = { id: string; title: string; total_amount: number; created_at: string; creator_id: string; myBalance: number; friends: Friend[] };
 type EditableMember = { id: string; full_name: string; username: string; shareAmount: number; shareAmountInput: string };
 type AvailableFriend = { id: string; full_name: string; username: string };
+type HomePalette = typeof THEME_PALETTES.dark;
+type HomeStyles = ReturnType<typeof createStyles>;
 
 // ── Animated entrance hook ────────────────────────────────────────────────────
 function useFadeSlide(delay = 0, isActive = true) {
@@ -100,9 +84,11 @@ type SplitCardProps = {
   split: Split;
   onMenuOpen: (split: Split, position: { x: number; y: number }) => void;
   onDelete: (split: Split) => void;
+  palette: HomePalette;
+  styles: HomeStyles;
 };
 
-function SplitCard({ split, onMenuOpen, onDelete }: SplitCardProps) {
+function SplitCard({ split, onMenuOpen, onDelete, palette: C, styles }: SplitCardProps) {
   const menuButtonRef = useRef<View>(null);
 
   const owedToYou = split.myBalance > 0 ? split.myBalance : 0;
@@ -195,6 +181,9 @@ function SplitCard({ split, onMenuOpen, onDelete }: SplitCardProps) {
 
 // ── HomeScreen ────────────────────────────────────────────────────────────────
 export default function HomeScreen() {
+  const { palette } = useAppTheme();
+  const C = palette;
+  const styles = createStyles(C);
   const [splits, setSplits] = useState<Split[]>([]);
   const isFocused = useIsFocused();
   const [loading, setLoading] = useState(true);
@@ -291,7 +280,18 @@ export default function HomeScreen() {
     } finally { setLoadingEditData(false); }
   };
 
-  const closeEditModal = () => { setEditModalVisible(false); setEditTitle(""); setEditTotal(""); setEditMembers([]); setAvailableFriends([]); };
+  const resetEditModal = () => {
+    setEditModalVisible(false);
+    setEditTitle("");
+    setEditTotal("");
+    setEditMembers([]);
+    setAvailableFriends([]);
+  };
+
+  const closeEditModal = () => {
+    Keyboard.dismiss();
+    resetEditModal();
+  };
 
   const totalAmount = parseFloat(editTotal) || 0;
   const allocated = editMembers.reduce((sum, m) => sum + (parseFloat(m.shareAmountInput) || 0), 0);
@@ -365,11 +365,17 @@ export default function HomeScreen() {
   };
 
   return (
+    <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
     <SafeAreaView style={styles.safe}>
       <FloatingOrb style={styles.orb1} />
       <FloatingOrb style={styles.orb2} />
 
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="never"
+        keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+      >
 
         {/* ── HEADER ── */}
         <Animated.View style={[styles.header, headerAnim]}>
@@ -430,6 +436,8 @@ export default function HomeScreen() {
               split={split}
               onMenuOpen={openActionMenu}
               onDelete={confirmDeleteSplit}
+              palette={C}
+              styles={styles}
             />
           ))}
         </Animated.View>
@@ -453,14 +461,21 @@ export default function HomeScreen() {
       </Modal>
 
       {/* ── EDIT MODAL ── */}
-      <Modal visible={editModalVisible} animationType="slide" transparent onRequestClose={closeEditModal}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalSheet}>
-            {/* handle bar */}
-            <View style={styles.modalHandle} />
+      <Modal visible={editModalVisible} animationType="fade" transparent onRequestClose={closeEditModal}>
+        <Pressable style={styles.modalOverlay} onPress={Keyboard.dismiss}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            style={styles.modalKeyboardWrap}
+          >
+          <Animated.View style={styles.modalSheet}>
+          <Pressable style={styles.modalSheetContent} onPress={(e) => e.stopPropagation()}>
             <Text style={styles.modalTitle}>Edit Split</Text>
 
-            <ScrollView showsVerticalScrollIndicator={false}>
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="never"
+              keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+            >
               <Text style={styles.modalLabel}>Split Name</Text>
               <TextInput
                 style={styles.modalInput}
@@ -553,14 +568,18 @@ export default function HomeScreen() {
                 <Text style={styles.modalSaveText}>{isSaving ? "Saving…" : "Save Changes"}</Text>
               </Pressable>
             </View>
-          </View>
-        </View>
+          </Pressable>
+          </Animated.View>
+          </KeyboardAvoidingView>
+        </Pressable>
       </Modal>
     </SafeAreaView>
+    </TouchableWithoutFeedback>
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(C: typeof THEME_PALETTES.dark) {
+return StyleSheet.create({
   safe: { flex: 1, backgroundColor: C.bg },
   scroll: { paddingHorizontal: 16, paddingTop: 20, paddingBottom: 140 },
 
@@ -634,9 +653,10 @@ const styles = StyleSheet.create({
   popoverDivider: { height: 1, backgroundColor: C.border, marginHorizontal: 10 },
 
   // edit modal
-  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "flex-end" },
-  modalSheet: { backgroundColor: C.card, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 20, paddingBottom: 36, maxHeight: "88%", borderWidth: 1, borderColor: C.border },
-  modalHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: C.border, alignSelf: "center", marginBottom: 20 },
+  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", paddingHorizontal: 16 },
+  modalKeyboardWrap: { flex: 1, justifyContent: "center" },
+  modalSheet: { backgroundColor: C.card, borderRadius: 28, padding: 20, paddingBottom: 24, maxHeight: "78%", borderWidth: 1, borderColor: C.border, shadowColor: "#000", shadowOpacity: 0.22, shadowRadius: 24, shadowOffset: { width: 0, height: 10 }, elevation: 10 },
+  modalSheetContent: {},
   modalTitle: { fontSize: 20, fontWeight: "800", color: C.textPrimary, marginBottom: 20, letterSpacing: -0.3 },
   modalLabel: { fontSize: 11, fontWeight: "700", color: C.textSecondary, textTransform: "uppercase", letterSpacing: 1, marginBottom: 8, marginTop: 16 },
   modalInput: { backgroundColor: C.surface, borderRadius: 12, borderWidth: 1, borderColor: C.border, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, color: C.textPrimary },
@@ -670,3 +690,4 @@ const styles = StyleSheet.create({
   modalSaveBtn: { flex: 1, borderRadius: 14, backgroundColor: C.accent, paddingVertical: 14, alignItems: "center", shadowColor: C.accent, shadowOpacity: 0.4, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } },
   modalSaveText: { fontSize: 15, fontWeight: "700", color: "#fff" },
 });
+}

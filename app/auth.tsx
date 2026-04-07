@@ -8,6 +8,7 @@ import {
   Animated,
   Dimensions,
   Easing,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   SafeAreaView,
@@ -17,22 +18,46 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   View,
 } from 'react-native'
+import { THEME_PALETTES } from '../lib/app-theme'
 import { supabase } from '../lib/supabaseClient'
 
 const { width, height } = Dimensions.get('window')
+const INTRO_MESSAGES = [
+  'Split bills. Not friendships.',
+  'Keep every expense clean and easy.',
+  'Track shared costs without the mess.',
+  'Make group spending feel simple.',
+  'Sort out expenses in seconds.',
+  'Stay on top of every shared bill.',
+]
+let hasPlayedAuthIntro = false
+
+const pickIntroMessage = (current?: string) => {
+  const options = INTRO_MESSAGES.filter((message) => message !== current)
+  const pool = options.length > 0 ? options : INTRO_MESSAGES
+  return pool[Math.floor(Math.random() * pool.length)]
+}
 
 export default function AuthScreen() {
   const router = useRouter()
+  const C = THEME_PALETTES.dark
+  const styles = createStyles(C)
+  const pageGradient: [string, string, string] = ['#0F0C29', '#1a1a4e', '#24243e']
+  const placeholderColor = 'rgba(255,255,255,0.3)'
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [sessionEmail, setSessionEmail] = useState<string | null>(null)
   const [welcomeName, setWelcomeName] = useState('')
+  const [introMessage, setIntroMessage] = useState(() => pickIntroMessage())
+  const [showIntro, setShowIntro] = useState(true)
   const [entryPhase, setEntryPhase] = useState<'idle' | 'success' | 'loading'>('idle')
   const [loading, setLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const entryTimers = useRef<ReturnType<typeof setTimeout>[]>([])
+  const introTimers = useRef<ReturnType<typeof setTimeout>[]>([])
 
   // Animation values — untouched
   const [monkeyPosition] = useState(new Animated.Value(0))
@@ -42,6 +67,14 @@ export default function AuthScreen() {
   const scaleAnim = useRef(new Animated.Value(0.9)).current
   const titleSlideAnim = useRef(new Animated.Value(-50)).current
   const logoFloatAnim = useRef(new Animated.Value(0)).current
+  const introOverlayOpacity = useRef(new Animated.Value(1)).current
+  const introLogoTranslateY = useRef(new Animated.Value(0)).current
+  const introLogoScale = useRef(new Animated.Value(1)).current
+  const introLogoOpacity = useRef(new Animated.Value(1)).current
+  const introWelcomeOpacity = useRef(new Animated.Value(1)).current
+  const introWelcomeShift = useRef(new Animated.Value(0)).current
+  const introContentOpacity = useRef(new Animated.Value(0)).current
+  const introContentShift = useRef(new Animated.Value(22)).current
   const authExitOpacity = useRef(new Animated.Value(1)).current
   const authExitScale = useRef(new Animated.Value(1)).current
   const successOpacity = useRef(new Animated.Value(0)).current
@@ -70,8 +103,121 @@ export default function AuthScreen() {
     return () => {
       authListener.subscription.unsubscribe()
       entryTimers.current.forEach((timer) => clearTimeout(timer))
+      introTimers.current.forEach((timer) => clearTimeout(timer))
     }
   }, [])
+
+  useEffect(() => {
+    if (sessionEmail) {
+      setShowIntro(false)
+      introOverlayOpacity.setValue(0)
+      introContentOpacity.setValue(1)
+      introContentShift.setValue(0)
+      introLogoOpacity.setValue(0)
+      introWelcomeOpacity.setValue(0)
+      introWelcomeShift.setValue(10)
+      return
+    }
+
+    if (hasPlayedAuthIntro) {
+      setShowIntro(false)
+      introOverlayOpacity.setValue(0)
+      introContentOpacity.setValue(1)
+      introContentShift.setValue(0)
+      introLogoOpacity.setValue(0)
+      introWelcomeOpacity.setValue(0)
+      introWelcomeShift.setValue(10)
+      return
+    }
+
+    setShowIntro(true)
+    hasPlayedAuthIntro = true
+    setIntroMessage((current) => pickIntroMessage(current))
+    introOverlayOpacity.setValue(1)
+    introLogoTranslateY.setValue(0)
+    introLogoScale.setValue(1)
+    introLogoOpacity.setValue(1)
+    introWelcomeOpacity.setValue(1)
+    introWelcomeShift.setValue(0)
+    introContentOpacity.setValue(0)
+    introContentShift.setValue(22)
+
+    const startTimer = setTimeout(() => {
+      Animated.parallel([
+        Animated.timing(introLogoTranslateY, {
+          toValue: -(height * 0.235),
+          duration: 1120,
+          easing: Easing.inOut(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(introLogoScale, {
+          toValue: 0.9,
+          duration: 1120,
+          easing: Easing.inOut(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(introLogoOpacity, {
+          toValue: 0.78,
+          duration: 900,
+          delay: 120,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(introWelcomeOpacity, {
+          toValue: 0,
+          duration: 360,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(introWelcomeShift, {
+          toValue: 14,
+          duration: 360,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(introContentOpacity, {
+          toValue: 1,
+          duration: 760,
+          delay: 520,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(introContentShift, {
+          toValue: 0,
+          duration: 760,
+          delay: 520,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+      ]).start()
+    }, 880)
+
+    const finishTimer = setTimeout(() => {
+      Animated.timing(introOverlayOpacity, {
+        toValue: 0,
+        duration: 420,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start(() => setShowIntro(false))
+    }, 2500)
+
+    introTimers.current.push(startTimer, finishTimer)
+
+    return () => {
+      clearTimeout(startTimer)
+      clearTimeout(finishTimer)
+    }
+  }, [
+    introContentOpacity,
+    introContentShift,
+    introLogoScale,
+    introLogoOpacity,
+    introLogoTranslateY,
+    introOverlayOpacity,
+    introWelcomeOpacity,
+    introWelcomeShift,
+    sessionEmail,
+  ])
 
   useEffect(() => {
     const floatingLoop = Animated.loop(
@@ -280,8 +426,9 @@ export default function AuthScreen() {
   // ── Logged-in state ──────────────────────────────────────────
   if (sessionEmail && entryPhase === 'idle') {
     return (
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
       <View style={styles.root}>
-        <LinearGradient colors={['#0F0C29', '#1a1a4e', '#24243e']} style={StyleSheet.absoluteFillObject} />
+        <LinearGradient colors={pageGradient} style={StyleSheet.absoluteFillObject} />
         <SafeAreaView style={styles.safeArea}>
           <StatusBar barStyle="light-content" />
           <View style={styles.loggedInContent}>
@@ -297,13 +444,15 @@ export default function AuthScreen() {
           </View>
         </SafeAreaView>
       </View>
+      </TouchableWithoutFeedback>
     )
   }
 
   // ── Login state ──────────────────────────────────────────────
   return (
+    <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
     <View style={styles.root}>
-      <LinearGradient colors={['#0F0C29', '#1a1a4e', '#24243e']} style={StyleSheet.absoluteFillObject} />
+      <LinearGradient colors={pageGradient} style={StyleSheet.absoluteFillObject} />
 
       {/* Decorative orbs — purely visual */}
       <View pointerEvents="none" style={styles.orb1} />
@@ -324,7 +473,13 @@ export default function AuthScreen() {
           >
             <View style={styles.gradientWrapper}>
               <Animated.View
-                style={[styles.content, { opacity: fadeAnim, transform: [{ translateY: slideAnim }, { scale: scaleAnim }] }]}
+                style={[
+                  styles.content,
+                  {
+                    opacity: Animated.multiply(fadeAnim, introContentOpacity),
+                    transform: [{ translateY: slideAnim }, { translateY: introContentShift }, { scale: scaleAnim }],
+                  },
+                ]}
               >
                 <ScrollView
                   contentContainerStyle={styles.scrollContent}
@@ -333,7 +488,8 @@ export default function AuthScreen() {
                   overScrollMode="always"
                   alwaysBounceVertical={true}
                   decelerationRate="normal"
-                  keyboardShouldPersistTaps="handled"
+                  keyboardShouldPersistTaps="never"
+                  keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
                 >
                 {/* Title */}
                 <Animated.View style={{ transform: [{ translateY: titleSlideAnim }, { translateY: logoFloatAnim }] }}>
@@ -361,7 +517,7 @@ export default function AuthScreen() {
                       <Text style={styles.inputIcon}>✉️</Text>
                       <TextInput
                         placeholder="your@email.com"
-                        placeholderTextColor="rgba(255,255,255,0.3)"
+                        placeholderTextColor={placeholderColor}
                         autoCapitalize="none"
                         keyboardType="email-address"
                         value={email}
@@ -379,7 +535,7 @@ export default function AuthScreen() {
                       <Text style={styles.inputIcon}>🔒</Text>
                       <TextInput
                         placeholder="••••••••"
-                        placeholderTextColor="rgba(255,255,255,0.3)"
+                        placeholderTextColor={placeholderColor}
                         secureTextEntry={!showPassword}
                         value={password}
                         onChangeText={setPassword}
@@ -429,6 +585,53 @@ export default function AuthScreen() {
           </KeyboardAvoidingView>
         </Animated.View>
       </SafeAreaView>
+
+      {showIntro && !sessionEmail && (
+        <Animated.View pointerEvents="none" style={[styles.introOverlay, { opacity: introOverlayOpacity }]}>
+          <LinearGradient
+            colors={['rgba(15,12,41,0.98)', 'rgba(22,20,56,0.96)', 'rgba(15,12,41,0.92)']}
+            start={{ x: 0.1, y: 0 }}
+            end={{ x: 0.9, y: 1 }}
+            style={StyleSheet.absoluteFillObject}
+          />
+          <View style={styles.introOrbMain} />
+          <View style={styles.introOrbAccent} />
+          <Animated.View
+            style={[
+              styles.introLogoWrap,
+              {
+                opacity: introLogoOpacity,
+                transform: [
+                  { translateY: introLogoTranslateY },
+                  { scale: introLogoScale },
+                  { translateY: logoFloatAnim },
+                ],
+              },
+            ]}
+          >
+              <View style={styles.titleContainer}>
+                <Text style={styles.titlePrefix}>Split</Text>
+                <Text style={styles.titleHighlight}>It</Text>
+                <Text style={styles.titleSuffix}>Up</Text>
+              </View>
+          </Animated.View>
+          <Animated.View
+            style={[
+              styles.introMessageCard,
+              {
+                opacity: introWelcomeOpacity,
+                transform: [{ translateY: introWelcomeShift }],
+              },
+            ]}
+          >
+            <View style={styles.introTextWrap}>
+              <Text style={styles.introEyebrow}>Welcome to</Text>
+              <Text style={styles.introHeadline}>Split It Up</Text>
+              <Text style={styles.introSubtitle}>{introMessage}</Text>
+            </View>
+          </Animated.View>
+        </Animated.View>
+      )}
 
       {entryPhase !== 'idle' && (
         <Animated.View
@@ -519,11 +722,12 @@ export default function AuthScreen() {
         </Animated.View>
       )}
     </View>
+    </TouchableWithoutFeedback>
   )
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#0F0C29' },
+const createStyles = (C: typeof THEME_PALETTES.dark) => StyleSheet.create({
+  root: { flex: 1, backgroundColor: C.bg },
   safeArea: { flex: 1 },
   authShell: { flex: 1 },
   container: { flex: 1 },
@@ -531,29 +735,98 @@ const styles = StyleSheet.create({
   content: { flex: 1, paddingHorizontal: 24, paddingTop: 40 },
   scrollContent: { flexGrow: 1, paddingBottom: 40 },
 
+  introOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    backgroundColor: 'rgba(15, 12, 41, 0.95)',
+  },
+  introOrbMain: {
+    position: 'absolute',
+    width: 300,
+    height: 300,
+    borderRadius: 150,
+    backgroundColor: C.mode === 'dark' ? 'rgba(127,127,213,0.22)' : 'rgba(124,58,237,0.14)',
+    top: height * 0.16,
+  },
+  introOrbAccent: {
+    position: 'absolute',
+    width: 180,
+    height: 180,
+    borderRadius: 90,
+    backgroundColor: C.mode === 'dark' ? 'rgba(145,234,228,0.12)' : 'rgba(56,189,248,0.12)',
+    top: height * 0.24,
+    right: width * 0.2,
+  },
+  introLogoWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 30,
+  },
+  introMessageCard: {
+    width: '100%',
+    maxWidth: 312,
+    borderRadius: 26,
+    paddingHorizontal: 22,
+    paddingVertical: 18,
+    backgroundColor: C.mode === 'dark' ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.72)',
+    borderWidth: 1,
+    borderColor: C.mode === 'dark' ? 'rgba(255,255,255,0.10)' : 'rgba(24,24,38,0.08)',
+    shadowColor: C.mode === 'dark' ? '#0B0918' : '#c7d2fe',
+    shadowOpacity: 0.18,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 8,
+  },
+  introTextWrap: {
+    alignItems: 'center',
+  },
+  introEyebrow: {
+    color: C.mode === 'dark' ? 'rgba(145,234,228,0.88)' : C.accent,
+    fontSize: 13,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 1.4,
+    marginBottom: 10,
+  },
+  introHeadline: {
+    color: C.textPrimary,
+    fontSize: 34,
+    fontWeight: '800',
+    letterSpacing: -1,
+    marginBottom: 10,
+  },
+  introSubtitle: {
+    color: C.textSecondary,
+    fontSize: 15,
+    lineHeight: 22,
+    textAlign: 'center',
+  },
+
   // Orbs
-  orb1: { position: 'absolute', top: -60, left: -60, width: 220, height: 220, borderRadius: 110, backgroundColor: '#7F7FD5', opacity: 0.18 },
-  orb2: { position: 'absolute', top: height * 0.3, right: -80, width: 180, height: 180, borderRadius: 90, backgroundColor: '#86A8E7', opacity: 0.13 },
-  orb3: { position: 'absolute', bottom: 80, left: width * 0.2, width: 140, height: 140, borderRadius: 70, backgroundColor: '#91EAE4', opacity: 0.1 },
+  orb1: { position: 'absolute', top: -60, left: -60, width: 220, height: 220, borderRadius: 110, backgroundColor: C.orbPrimary, opacity: 0.18 },
+  orb2: { position: 'absolute', top: height * 0.3, right: -80, width: 180, height: 180, borderRadius: 90, backgroundColor: C.blue, opacity: 0.13 },
+  orb3: { position: 'absolute', bottom: 80, left: width * 0.2, width: 140, height: 140, borderRadius: 70, backgroundColor: C.orbSecondary, opacity: 0.1 },
 
   // Title
   titleContainer: { flexDirection: 'row', justifyContent: 'center', alignItems: 'baseline', marginBottom: 8 },
-  titlePrefix: { fontSize: 44, fontWeight: '800', color: '#FFFFFF', letterSpacing: -1.5 },
+  titlePrefix: { fontSize: 44, fontWeight: '800', color: C.textPrimary, letterSpacing: -1.5 },
   titleHighlight: { fontSize: 54, fontWeight: '900', color: '#FFE66D', letterSpacing: -2, marginHorizontal: 2, transform: [{ rotate: '-3deg' }], textShadowColor: 'rgba(255,230,109,0.4)', textShadowOffset: { width: 0, height: 4 }, textShadowRadius: 12 },
-  titleSuffix: { fontSize: 44, fontWeight: '800', color: '#FFFFFF', letterSpacing: -1.5 },
-  subtitle: { fontSize: 15, color: 'rgba(255,255,255,0.5)', textAlign: 'center', marginBottom: 32, letterSpacing: 0.3 },
+  titleSuffix: { fontSize: 44, fontWeight: '800', color: C.textPrimary, letterSpacing: -1.5 },
+  subtitle: { fontSize: 15, color: C.textSecondary, textAlign: 'center', marginBottom: 32, letterSpacing: 0.3 },
 
   // Card
-  card: { backgroundColor: 'rgba(255,255,255,0.07)', borderRadius: 28, padding: 24, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', overflow: 'hidden', marginBottom: 16 },
-  cardGlow: { position: 'absolute', top: -40, right: -40, width: 160, height: 160, borderRadius: 80, backgroundColor: '#7F7FD5', opacity: 0.08 },
-  cardTitle: { fontSize: 22, fontWeight: '700', color: '#FFFFFF', marginBottom: 20, letterSpacing: -0.5 },
+  card: { backgroundColor: C.mode === 'dark' ? 'rgba(255,255,255,0.07)' : 'rgba(255,255,255,0.78)', borderRadius: 28, padding: 24, borderWidth: 1, borderColor: C.mode === 'dark' ? 'rgba(255,255,255,0.12)' : 'rgba(24,24,38,0.08)', overflow: 'hidden', marginBottom: 16 },
+  cardGlow: { position: 'absolute', top: -40, right: -40, width: 160, height: 160, borderRadius: 80, backgroundColor: C.accent, opacity: 0.08 },
+  cardTitle: { fontSize: 22, fontWeight: '700', color: C.textPrimary, marginBottom: 20, letterSpacing: -0.5 },
 
   // Inputs
   inputWrapper: { marginBottom: 16 },
-  inputLabel: { fontSize: 11, fontWeight: '600', color: 'rgba(255,255,255,0.5)', letterSpacing: 1, marginBottom: 8 },
-  inputContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', paddingHorizontal: 14, overflow: 'hidden' },
+  inputLabel: { fontSize: 11, fontWeight: '600', color: C.textSecondary, letterSpacing: 1, marginBottom: 8 },
+  inputContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.mode === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(24,24,38,0.04)', borderRadius: 14, borderWidth: 1, borderColor: C.mode === 'dark' ? 'rgba(255,255,255,0.12)' : 'rgba(24,24,38,0.08)', paddingHorizontal: 14, overflow: 'hidden' },
   inputIcon: { fontSize: 15, marginRight: 10 },
-  input: { flex: 1, paddingVertical: 14, fontSize: 16, color: '#FFFFFF' },
+  input: { flex: 1, paddingVertical: 14, fontSize: 16, color: C.textPrimary },
   passwordInput: { paddingRight: 50 },
   eyeButton: { position: 'absolute', right: 12, padding: 8 },
   eyeButtonText: { fontSize: 22 },
@@ -561,7 +834,7 @@ const styles = StyleSheet.create({
   // Forgot
   forgotPasswordContainer: { alignItems: 'flex-end', marginBottom: 16 },
   forgotPassword: { padding: 4 },
-  forgotPasswordText: { color: '#91EAE4', fontSize: 13, fontWeight: '600' },
+  forgotPasswordText: { color: C.blue, fontSize: 13, fontWeight: '600' },
 
   // Button
   buttonWrapper: { borderRadius: 16, overflow: 'hidden', shadowColor: '#86A8E7', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.35, shadowRadius: 16, elevation: 8 },
@@ -570,8 +843,8 @@ const styles = StyleSheet.create({
 
   // Divider
   divider: { flexDirection: 'row', alignItems: 'center', marginVertical: 20 },
-  dividerLine: { flex: 1, height: 1, backgroundColor: 'rgba(255,255,255,0.1)' },
-  dividerText: { marginHorizontal: 12, fontSize: 11, color: 'rgba(255,255,255,0.3)', fontWeight: '500', textTransform: 'uppercase', letterSpacing: 0.8 },
+  dividerLine: { flex: 1, height: 1, backgroundColor: C.mode === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(24,24,38,0.1)' },
+  dividerText: { marginHorizontal: 12, fontSize: 11, color: C.textMuted, fontWeight: '500', textTransform: 'uppercase', letterSpacing: 0.8 },
 
   // Toggle
   toggleContainer: { flexDirection: 'row', justifyContent: 'center' },
@@ -581,14 +854,14 @@ const styles = StyleSheet.create({
   loggedInContent: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
   successIcon: { marginBottom: 24 },
   successIconText: { fontSize: 100 },
-  loggedInTitle: { fontSize: 32, fontWeight: '800', color: '#FFF', marginBottom: 8 },
-  loggedInEmail: { fontSize: 18, color: 'rgba(255,255,255,0.7)', marginBottom: 32, textAlign: 'center' },
+  loggedInTitle: { fontSize: 32, fontWeight: '800', color: C.textPrimary, marginBottom: 8 },
+  loggedInEmail: { fontSize: 18, color: C.textSecondary, marginBottom: 32, textAlign: 'center' },
   logoutButton: { width: '100%', maxWidth: 300, borderRadius: 16, overflow: 'hidden', elevation: 5 },
   welcomeOverlay: {
     ...StyleSheet.absoluteFillObject,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(7, 6, 22, 0.7)',
+    backgroundColor: C.mode === 'dark' ? 'rgba(7, 6, 22, 0.7)' : 'rgba(245,247,255,0.76)',
     paddingHorizontal: 24,
   },
   successStageCard: {
@@ -597,9 +870,9 @@ const styles = StyleSheet.create({
     borderRadius: 30,
     paddingHorizontal: 24,
     paddingVertical: 28,
-    backgroundColor: 'rgba(17, 16, 40, 0.98)',
+    backgroundColor: C.mode === 'dark' ? 'rgba(17, 16, 40, 0.98)' : 'rgba(255,255,255,0.98)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.10)',
+    borderColor: C.mode === 'dark' ? 'rgba(255,255,255,0.10)' : 'rgba(24,24,38,0.08)',
     alignItems: 'center',
     shadowColor: '#0B0918',
     shadowOpacity: 0.26,
@@ -621,14 +894,14 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   successStageTitle: {
-    color: '#FFFFFF',
+    color: C.textPrimary,
     fontSize: 30,
     fontWeight: '800',
     letterSpacing: -0.9,
     marginBottom: 8,
   },
   successStageSubtitle: {
-    color: 'rgba(255,255,255,0.62)',
+    color: C.textSecondary,
     fontSize: 14,
     lineHeight: 20,
     textAlign: 'center',
@@ -638,14 +911,14 @@ const styles = StyleSheet.create({
     width: 300,
     height: 300,
     borderRadius: 150,
-    backgroundColor: 'rgba(127, 127, 213, 0.22)',
+    backgroundColor: C.mode === 'dark' ? 'rgba(127, 127, 213, 0.22)' : 'rgba(124,58,237,0.14)',
   },
   welcomeBackdropGlowSecondary: {
     position: 'absolute',
     width: 180,
     height: 180,
     borderRadius: 90,
-    backgroundColor: 'rgba(145, 234, 228, 0.12)',
+    backgroundColor: C.mode === 'dark' ? 'rgba(145, 234, 228, 0.12)' : 'rgba(56,189,248,0.12)',
     bottom: '34%',
   },
   welcomeCard: {
@@ -654,9 +927,9 @@ const styles = StyleSheet.create({
     borderRadius: 30,
     paddingHorizontal: 24,
     paddingVertical: 30,
-    backgroundColor: 'rgba(15, 14, 36, 0.96)',
+    backgroundColor: C.mode === 'dark' ? 'rgba(15, 14, 36, 0.96)' : 'rgba(255,255,255,0.96)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.10)',
+    borderColor: C.mode === 'dark' ? 'rgba(255,255,255,0.10)' : 'rgba(24,24,38,0.08)',
     alignItems: 'center',
     shadowColor: '#0B0918',
     shadowOpacity: 0.32,
@@ -681,7 +954,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   welcomeEyebrow: {
-    color: 'rgba(145,234,228,0.82)',
+    color: C.mode === 'dark' ? 'rgba(145,234,228,0.82)' : C.accent,
     fontSize: 12,
     fontWeight: '700',
     textTransform: 'uppercase',
@@ -689,7 +962,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   welcomeName: {
-    color: '#FFFFFF',
+    color: C.textPrimary,
     fontSize: 32,
     fontWeight: '800',
     letterSpacing: -1,
@@ -697,7 +970,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   welcomeSubtitle: {
-    color: 'rgba(255,255,255,0.62)',
+    color: C.textSecondary,
     fontSize: 14,
     lineHeight: 20,
     textAlign: 'center',
@@ -708,7 +981,7 @@ const styles = StyleSheet.create({
     height: 7,
     borderRadius: 999,
     overflow: 'hidden',
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: C.mode === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(24,24,38,0.08)',
   },
   welcomeProgressFill: {
     height: '100%',

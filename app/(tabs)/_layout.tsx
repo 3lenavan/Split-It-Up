@@ -5,31 +5,26 @@ import React from "react";
 import { Platform, StyleSheet, Text, View } from "react-native";
 
 import { HapticTab } from "@/components/haptic-tab";
+import { useAppTheme } from "@/lib/app-theme";
 import { IconSymbol } from "@/components/ui/icon-symbol";
-
-const C = {
-  bg: "#07070f",
-  surface: "#141420",
-  surfaceSoft: "#1a1a29",
-  border: "#2c2c42",
-  accent: "#a855f7",
-  accentSoft: "#d8b4fe",
-  blue: "#38bdf8",
-  text: "#f3f0ff",
-  textMuted: "#8c89a8",
-};
 
 function TabBarIcon({
   focused,
   color,
   label,
   name,
+  colors,
+  styles,
 }: {
   focused: boolean;
   color: string;
   label: string;
   name: "house.fill" | "plus.circle.fill" | "person.fill";
+  colors: ReturnType<typeof useAppTheme>["palette"];
+  styles: ReturnType<typeof createStyles>;
 }) {
+  const iconStyle = name === "person.fill" ? styles.profileIconAdjust : undefined;
+
   return (
     <View style={styles.tabItemWrap}>
       {focused ? (
@@ -40,13 +35,13 @@ function TabBarIcon({
           style={styles.activeTabPill}
         >
           <View style={styles.activeIconShell}>
-            <IconSymbol size={21} name={name} color={C.text} />
+            <IconSymbol size={21} name={name} color={colors.tabText} style={iconStyle} />
           </View>
           <Text style={styles.activeTabLabel}>{label}</Text>
         </LinearGradient>
       ) : (
         <View style={styles.inactiveTab}>
-          <IconSymbol size={21} name={name} color={color} />
+          <IconSymbol size={21} name={name} color={color} style={iconStyle} />
           <Text style={styles.inactiveTabLabel}>{label}</Text>
         </View>
       )}
@@ -54,12 +49,16 @@ function TabBarIcon({
   );
 }
 
-function TabBarBackground() {
+function TabBarBackground({ styles, colors }: { styles: ReturnType<typeof createStyles>; colors: ReturnType<typeof useAppTheme>["palette"] }) {
   return (
     <View style={styles.backgroundWrap}>
-      <BlurView intensity={60} tint="dark" style={StyleSheet.absoluteFill} />
+      <BlurView intensity={60} tint={colors.mode === "dark" ? "dark" : "light"} style={StyleSheet.absoluteFill} />
       <LinearGradient
-        colors={["rgba(24,24,38,0.94)", "rgba(10,10,18,0.9)"]}
+        colors={
+          colors.mode === "dark"
+            ? ["rgba(24,24,38,0.94)", "rgba(10,10,18,0.9)"]
+            : ["rgba(255,255,255,0.94)", "rgba(239,243,255,0.92)"]
+        }
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={StyleSheet.absoluteFill}
@@ -68,13 +67,17 @@ function TabBarBackground() {
   );
 }
 
-function BottomEdgeMask() {
+function BottomEdgeMask({ styles, colors }: { styles: ReturnType<typeof createStyles>; colors: ReturnType<typeof useAppTheme>["palette"] }) {
   return (
     <View pointerEvents="none" style={styles.bottomMaskWrap}>
-      <BlurView intensity={42} tint="dark" style={StyleSheet.absoluteFill} />
+      <BlurView intensity={28} tint={colors.mode === "dark" ? "dark" : "light"} style={StyleSheet.absoluteFill} />
       <LinearGradient
-        colors={["rgba(7,7,15,0)", "rgba(7,7,15,0.72)", "rgba(7,7,15,0.98)"]}
-        locations={[0, 0.45, 1]}
+        colors={
+          colors.mode === "dark"
+            ? ["rgba(7,7,15,0.12)", "rgba(7,7,15,0.8)", "rgba(7,7,15,0.98)"]
+            : ["rgba(245,247,255,0.16)", "rgba(245,247,255,0.84)", "rgba(245,247,255,0.98)"]
+        }
+        locations={[0, 0.55, 1]}
         start={{ x: 0.5, y: 0 }}
         end={{ x: 0.5, y: 1 }}
         style={StyleSheet.absoluteFill}
@@ -84,23 +87,25 @@ function BottomEdgeMask() {
 }
 
 export default function TabLayout() {
+  const { palette: C } = useAppTheme();
+  const styles = createStyles(C);
+
   return (
     <View style={styles.root}>
-      <BottomEdgeMask />
       <Tabs
         screenOptions={{
           headerShown: false,
           tabBarButton: HapticTab,
           tabBarShowLabel: false,
-          tabBarActiveTintColor: C.text,
-          tabBarInactiveTintColor: C.textMuted,
+          tabBarActiveTintColor: C.tabText,
+          tabBarInactiveTintColor: C.tabTextMuted,
           animation: "shift",
           sceneStyle: {
             backgroundColor: C.bg,
           },
           tabBarStyle: styles.tabBar,
           tabBarItemStyle: styles.tabBarItem,
-          tabBarBackground: () => <TabBarBackground />,
+          tabBarBackground: () => <TabBarBackground styles={styles} colors={C} />,
         }}
       >
         <Tabs.Screen
@@ -108,7 +113,7 @@ export default function TabLayout() {
           options={{
             title: "Home",
             tabBarIcon: ({ focused, color }) => (
-              <TabBarIcon focused={focused} color={color} label="Home" name="house.fill" />
+              <TabBarIcon focused={focused} color={color} label="Home" name="house.fill" colors={C} styles={styles} />
             ),
           }}
         />
@@ -117,7 +122,7 @@ export default function TabLayout() {
           options={{
             title: "Add",
             tabBarIcon: ({ focused, color }) => (
-              <TabBarIcon focused={focused} color={color} label="Add" name="plus.circle.fill" />
+              <TabBarIcon focused={focused} color={color} label="Add" name="plus.circle.fill" colors={C} styles={styles} />
             ),
           }}
         />
@@ -126,16 +131,17 @@ export default function TabLayout() {
           options={{
             title: "Profile",
             tabBarIcon: ({ focused, color }) => (
-              <TabBarIcon focused={focused} color={color} label="Profile" name="person.fill" />
+              <TabBarIcon focused={focused} color={color} label="Profile" name="person.fill" colors={C} styles={styles} />
             ),
           }}
         />
       </Tabs>
+      <BottomEdgeMask styles={styles} colors={C} />
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (C: ReturnType<typeof useAppTheme>["palette"]) => StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: C.bg,
@@ -149,12 +155,13 @@ const styles = StyleSheet.create({
     borderRadius: 28,
     borderTopWidth: 0,
     backgroundColor: "transparent",
-    elevation: 0,
     shadowColor: "#000",
     shadowOpacity: 0.22,
     shadowRadius: 24,
     shadowOffset: { width: 0, height: 12 },
     overflow: "hidden",
+    zIndex: 20,
+    elevation: 20,
   },
   tabBarItem: {
     paddingVertical: 8,
@@ -164,16 +171,17 @@ const styles = StyleSheet.create({
     borderRadius: 28,
     overflow: "hidden",
     borderWidth: 1,
-    borderColor: C.border,
-    backgroundColor: C.surface,
+    borderColor: C.tabBorder,
+    backgroundColor: C.tabSurface,
   },
   bottomMaskWrap: {
     position: "absolute",
     left: 0,
     right: 0,
     bottom: 0,
-    height: 130,
-    zIndex: 0,
+    height: Platform.OS === "ios" ? 40 : 30,
+    zIndex: 10,
+    elevation: 10,
   },
   tabItemWrap: {
     flex: 1,
@@ -204,8 +212,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  profileIconAdjust: {
+    marginLeft: 1,
+  },
   activeTabLabel: {
-    color: C.text,
+    color: C.tabText,
     fontSize: 12,
     fontWeight: "800",
     letterSpacing: 0.2,
@@ -219,7 +230,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
   },
   inactiveTabLabel: {
-    color: C.textMuted,
+    color: C.tabTextMuted,
     fontSize: 11,
     fontWeight: "700",
     letterSpacing: 0.2,
