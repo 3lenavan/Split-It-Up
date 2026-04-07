@@ -94,7 +94,7 @@ function MetricCard({
     <>
       <Text
         adjustsFontSizeToFit
-        minimumFontScale={0.82}
+        minimumFontScale={0.96}
         numberOfLines={1}
         style={[styles.metricValue, toneStyles.value]}
       >
@@ -649,7 +649,7 @@ const styles = StyleSheet.create({
   metricCard: {
     width: "100%",
     borderRadius: 18,
-    paddingHorizontal: 12,
+    paddingHorizontal: 11,
     paddingVertical: 14,
     borderWidth: 1,
     minHeight: 88,
@@ -665,7 +665,8 @@ const styles = StyleSheet.create({
     marginBottom: 5,
     textAlign: "center",
     includeFontPadding: false,
-    lineHeight: 20,
+    lineHeight: 21,
+    letterSpacing: -0.2,
     fontVariant: ["tabular-nums"],
   },
   metricValueAccent: { color: C.accentBright },

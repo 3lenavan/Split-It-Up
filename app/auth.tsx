@@ -41,6 +41,7 @@ export default function AuthScreen() {
   const slideAnim = useRef(new Animated.Value(30)).current
   const scaleAnim = useRef(new Animated.Value(0.9)).current
   const titleSlideAnim = useRef(new Animated.Value(-50)).current
+  const logoFloatAnim = useRef(new Animated.Value(0)).current
   const authExitOpacity = useRef(new Animated.Value(1)).current
   const authExitScale = useRef(new Animated.Value(1)).current
   const successOpacity = useRef(new Animated.Value(0)).current
@@ -71,6 +72,31 @@ export default function AuthScreen() {
       entryTimers.current.forEach((timer) => clearTimeout(timer))
     }
   }, [])
+
+  useEffect(() => {
+    const floatingLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(logoFloatAnim, {
+          toValue: -7,
+          duration: 2400,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+        Animated.timing(logoFloatAnim, {
+          toValue: 0,
+          duration: 2400,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+      ])
+    )
+
+    floatingLoop.start()
+
+    return () => {
+      floatingLoop.stop()
+    }
+  }, [logoFloatAnim])
 
   useEffect(() => {
     Animated.sequence([
@@ -310,7 +336,7 @@ export default function AuthScreen() {
                   keyboardShouldPersistTaps="handled"
                 >
                 {/* Title */}
-                <Animated.View style={{ transform: [{ translateY: titleSlideAnim }] }}>
+                <Animated.View style={{ transform: [{ translateY: titleSlideAnim }, { translateY: logoFloatAnim }] }}>
                   <View style={styles.titleContainer}>
                     <Text style={styles.titlePrefix}>Split</Text>
                     <Text style={styles.titleHighlight}>It</Text>
