@@ -28,8 +28,11 @@ export default function AuthScreen() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [sessionEmail, setSessionEmail] = useState<string | null>(null)
+  const [welcomeName, setWelcomeName] = useState('')
+  const [entryPhase, setEntryPhase] = useState<'idle' | 'success' | 'loading'>('idle')
   const [loading, setLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
+  const entryTimers = useRef<ReturnType<typeof setTimeout>[]>([])
 
   // Animation values — untouched
   const [monkeyPosition] = useState(new Animated.Value(0))
@@ -38,6 +41,16 @@ export default function AuthScreen() {
   const slideAnim = useRef(new Animated.Value(30)).current
   const scaleAnim = useRef(new Animated.Value(0.9)).current
   const titleSlideAnim = useRef(new Animated.Value(-50)).current
+  const authExitOpacity = useRef(new Animated.Value(1)).current
+  const authExitScale = useRef(new Animated.Value(1)).current
+  const successOpacity = useRef(new Animated.Value(0)).current
+  const successScale = useRef(new Animated.Value(0.92)).current
+  const successSlide = useRef(new Animated.Value(20)).current
+  const loadingOpacity = useRef(new Animated.Value(0)).current
+  const loadingScale = useRef(new Animated.Value(0.94)).current
+  const loadingSlide = useRef(new Animated.Value(26)).current
+  const loadingGlow = useRef(new Animated.Value(0.92)).current
+  const loadingProgress = useRef(new Animated.Value(0)).current
 
   useEffect(() => {
     Animated.parallel([
@@ -53,7 +66,10 @@ export default function AuthScreen() {
     const { data: authListener } = supabase.auth.onAuthStateChange(
       (_event: string, session: Session | null) => { setSessionEmail(session?.user?.email ?? null) }
     )
-    return () => { authListener.subscription.unsubscribe() }
+    return () => {
+      authListener.subscription.unsubscribe()
+      entryTimers.current.forEach((timer) => clearTimeout(timer))
+    }
   }, [])
 
   useEffect(() => {
@@ -70,13 +86,154 @@ export default function AuthScreen() {
     return true
   }
 
+  const resolveWelcomeName = async (userId: string, emailValue: string) => {
+    const { data } = await supabase
+      .from('profiles')
+      .select('full_name, username')
+      .eq('id', userId)
+      .single()
+
+    return (
+      data?.username ||
+      data?.full_name ||
+      emailValue.split('@')[0] ||
+      'friend'
+    )
+  }
+
+  const queueTimer = (callback: () => void, delay: number) => {
+    const timer = setTimeout(callback, delay)
+    entryTimers.current.push(timer)
+  }
+
+  const playWelcomeAnimation = (name: string) => {
+    setWelcomeName(name)
+    setEntryPhase('success')
+    authExitOpacity.setValue(1)
+    authExitScale.setValue(1)
+    successOpacity.setValue(0)
+    successScale.setValue(0.92)
+    successSlide.setValue(20)
+    loadingOpacity.setValue(0)
+    loadingScale.setValue(0.94)
+    loadingSlide.setValue(26)
+    loadingGlow.setValue(0.92)
+    loadingProgress.setValue(0)
+
+    Animated.parallel([
+      Animated.timing(authExitOpacity, {
+        toValue: 0.16,
+        duration: 380,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(authExitScale, {
+        toValue: 0.97,
+        duration: 460,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(successOpacity, {
+        toValue: 1,
+        duration: 260,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.spring(successScale, {
+        toValue: 1,
+        tension: 82,
+        friction: 11,
+        useNativeDriver: true,
+      }),
+      Animated.spring(successSlide, {
+        toValue: 0,
+        tension: 78,
+        friction: 11,
+        useNativeDriver: true,
+      }),
+    ]).start()
+
+    queueTimer(() => {
+      Animated.parallel([
+        Animated.timing(successOpacity, {
+          toValue: 0,
+          duration: 180,
+          easing: Easing.in(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(successScale, {
+          toValue: 0.98,
+          duration: 180,
+          easing: Easing.in(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(successSlide, {
+          toValue: -10,
+          duration: 180,
+          easing: Easing.in(Easing.cubic),
+          useNativeDriver: true,
+        }),
+      ]).start(() => {
+        setEntryPhase('loading')
+        Animated.parallel([
+          Animated.timing(loadingOpacity, {
+            toValue: 1,
+            duration: 260,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: true,
+          }),
+          Animated.spring(loadingScale, {
+            toValue: 1,
+            tension: 76,
+            friction: 11,
+            useNativeDriver: true,
+          }),
+          Animated.spring(loadingSlide, {
+            toValue: 0,
+            tension: 74,
+            friction: 11,
+            useNativeDriver: true,
+          }),
+          Animated.sequence([
+            Animated.timing(loadingGlow, {
+              toValue: 1.08,
+              duration: 620,
+              useNativeDriver: true,
+            }),
+            Animated.timing(loadingGlow, {
+              toValue: 0.96,
+              duration: 700,
+              useNativeDriver: true,
+            }),
+          ]),
+          Animated.timing(loadingProgress, {
+            toValue: 1,
+            duration: 1600,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: false,
+          }),
+        ]).start()
+      })
+    }, 950)
+
+    queueTimer(() => {
+      router.replace('/(tabs)')
+    }, 2850)
+  }
+
   const signIn = async () => {
     if (!validateInputs()) return
     setLoading(true)
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
     setLoading(false)
     if (error) return Alert.alert('Login error', error.message)
-    router.replace('/(tabs)')
+
+    const user = data.user
+    const name = user
+      ? await resolveWelcomeName(user.id, user.email ?? email)
+      : email.split('@')[0]
+
+    playWelcomeAnimation(name)
   }
 
   const signOut = async () => {
@@ -95,7 +252,7 @@ export default function AuthScreen() {
   const togglePasswordVisibility = () => { setShowPassword(!showPassword) }
 
   // ── Logged-in state ──────────────────────────────────────────
-  if (sessionEmail) {
+  if (sessionEmail && entryPhase === 'idle') {
     return (
       <View style={styles.root}>
         <LinearGradient colors={['#0F0C29', '#1a1a4e', '#24243e']} style={StyleSheet.absoluteFillObject} />
@@ -129,23 +286,29 @@ export default function AuthScreen() {
 
       <SafeAreaView style={styles.safeArea}>
         <StatusBar barStyle="light-content" />
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.container}
+        <Animated.View
+          style={[
+            styles.authShell,
+            { opacity: authExitOpacity, transform: [{ scale: authExitScale }] },
+          ]}
         >
-          <View style={styles.gradientWrapper}>
-            <Animated.View
-              style={[styles.content, { opacity: fadeAnim, transform: [{ translateY: slideAnim }, { scale: scaleAnim }] }]}
-            >
-              <ScrollView
-                contentContainerStyle={styles.scrollContent}
-                showsVerticalScrollIndicator={false}
-                bounces={true}
-                overScrollMode="always"
-                alwaysBounceVertical={true}
-                decelerationRate="normal"
-                keyboardShouldPersistTaps="handled"
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            style={styles.container}
+          >
+            <View style={styles.gradientWrapper}>
+              <Animated.View
+                style={[styles.content, { opacity: fadeAnim, transform: [{ translateY: slideAnim }, { scale: scaleAnim }] }]}
               >
+                <ScrollView
+                  contentContainerStyle={styles.scrollContent}
+                  showsVerticalScrollIndicator={false}
+                  bounces={true}
+                  overScrollMode="always"
+                  alwaysBounceVertical={true}
+                  decelerationRate="normal"
+                  keyboardShouldPersistTaps="handled"
+                >
                 {/* Title */}
                 <Animated.View style={{ transform: [{ translateY: titleSlideAnim }] }}>
                   <View style={styles.titleContainer}>
@@ -234,11 +397,101 @@ export default function AuthScreen() {
                   </Animated.View>
                 </View>
 
-              </ScrollView>
-            </Animated.View>
-          </View>
-        </KeyboardAvoidingView>
+                </ScrollView>
+              </Animated.View>
+            </View>
+          </KeyboardAvoidingView>
+        </Animated.View>
       </SafeAreaView>
+
+      {entryPhase !== 'idle' && (
+        <Animated.View
+          pointerEvents="auto"
+          style={[
+            styles.welcomeOverlay,
+            {
+              opacity: entryPhase === 'success' ? successOpacity : loadingOpacity,
+            },
+          ]}
+        >
+          {entryPhase === 'success' ? (
+            <Animated.View
+              style={[
+                styles.successStageCard,
+                {
+                  transform: [
+                    { scale: successScale },
+                    { translateY: successSlide },
+                  ],
+                },
+              ]}
+            >
+              <LinearGradient
+                colors={['#7F7FD5', '#86A8E7', '#91EAE4']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.successStageEmojiWrap}
+              >
+                <Text style={styles.successStageEmoji}>:)</Text>
+              </LinearGradient>
+              <Text style={styles.successStageTitle}>Successful</Text>
+              <Text style={styles.successStageSubtitle}>
+                You are signed in, {welcomeName}.
+              </Text>
+            </Animated.View>
+          ) : (
+            <>
+              <Animated.View
+                style={[
+                  styles.welcomeBackdropGlow,
+                  { transform: [{ scale: loadingGlow }] },
+                ]}
+              />
+              <View style={styles.welcomeBackdropGlowSecondary} />
+              <Animated.View
+                style={[
+                  styles.welcomeCard,
+                  {
+                    transform: [
+                      { scale: loadingScale },
+                      { translateY: loadingSlide },
+                    ],
+                  },
+                ]}
+              >
+                <LinearGradient
+                  colors={['#7F7FD5', '#86A8E7', '#91EAE4']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.welcomeBadge}
+                >
+                  <Text style={styles.welcomeBadgeText}>
+                    {welcomeName ? welcomeName.charAt(0).toUpperCase() : 'W'}
+                  </Text>
+                </LinearGradient>
+                <View style={styles.loadingStageTextWrap}>
+                  <Text style={styles.welcomeEyebrow}>Welcome back</Text>
+                  <Text style={styles.welcomeName}>{welcomeName}</Text>
+                  <Text style={styles.welcomeSubtitle}>Redirecting to home page...</Text>
+                </View>
+                <View style={styles.welcomeProgressTrack}>
+                  <Animated.View
+                    style={[
+                      styles.welcomeProgressFill,
+                      {
+                        width: loadingProgress.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: ['0%', '100%'],
+                        }),
+                      },
+                    ]}
+                  />
+                </View>
+              </Animated.View>
+            </>
+          )}
+        </Animated.View>
+      )}
     </View>
   )
 }
@@ -246,6 +499,7 @@ export default function AuthScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#0F0C29' },
   safeArea: { flex: 1 },
+  authShell: { flex: 1 },
   container: { flex: 1 },
   gradientWrapper: { flex: 1 },
   content: { flex: 1, paddingHorizontal: 24, paddingTop: 40 },
@@ -304,4 +558,134 @@ const styles = StyleSheet.create({
   loggedInTitle: { fontSize: 32, fontWeight: '800', color: '#FFF', marginBottom: 8 },
   loggedInEmail: { fontSize: 18, color: 'rgba(255,255,255,0.7)', marginBottom: 32, textAlign: 'center' },
   logoutButton: { width: '100%', maxWidth: 300, borderRadius: 16, overflow: 'hidden', elevation: 5 },
+  welcomeOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(7, 6, 22, 0.7)',
+    paddingHorizontal: 24,
+  },
+  successStageCard: {
+    width: '100%',
+    maxWidth: 300,
+    borderRadius: 30,
+    paddingHorizontal: 24,
+    paddingVertical: 28,
+    backgroundColor: 'rgba(17, 16, 40, 0.98)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
+    alignItems: 'center',
+    shadowColor: '#0B0918',
+    shadowOpacity: 0.26,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 12,
+  },
+  successStageEmojiWrap: {
+    width: 74,
+    height: 74,
+    borderRadius: 37,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 18,
+  },
+  successStageEmoji: {
+    color: '#FFFFFF',
+    fontSize: 28,
+    fontWeight: '900',
+  },
+  successStageTitle: {
+    color: '#FFFFFF',
+    fontSize: 30,
+    fontWeight: '800',
+    letterSpacing: -0.9,
+    marginBottom: 8,
+  },
+  successStageSubtitle: {
+    color: 'rgba(255,255,255,0.62)',
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'center',
+  },
+  welcomeBackdropGlow: {
+    position: 'absolute',
+    width: 300,
+    height: 300,
+    borderRadius: 150,
+    backgroundColor: 'rgba(127, 127, 213, 0.22)',
+  },
+  welcomeBackdropGlowSecondary: {
+    position: 'absolute',
+    width: 180,
+    height: 180,
+    borderRadius: 90,
+    backgroundColor: 'rgba(145, 234, 228, 0.12)',
+    bottom: '34%',
+  },
+  welcomeCard: {
+    width: '100%',
+    maxWidth: 332,
+    borderRadius: 30,
+    paddingHorizontal: 24,
+    paddingVertical: 30,
+    backgroundColor: 'rgba(15, 14, 36, 0.96)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
+    alignItems: 'center',
+    shadowColor: '#0B0918',
+    shadowOpacity: 0.32,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 12,
+  },
+  welcomeBadge: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 18,
+  },
+  welcomeBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 30,
+    fontWeight: '900',
+  },
+  loadingStageTextWrap: {
+    alignItems: 'center',
+  },
+  welcomeEyebrow: {
+    color: 'rgba(145,234,228,0.82)',
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 1.1,
+    marginBottom: 10,
+  },
+  welcomeName: {
+    color: '#FFFFFF',
+    fontSize: 32,
+    fontWeight: '800',
+    letterSpacing: -1,
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  welcomeSubtitle: {
+    color: 'rgba(255,255,255,0.62)',
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  welcomeProgressTrack: {
+    width: '100%',
+    height: 7,
+    borderRadius: 999,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  welcomeProgressFill: {
+    height: '100%',
+    backgroundColor: '#91EAE4',
+  },
 })

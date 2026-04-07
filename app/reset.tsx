@@ -1,26 +1,77 @@
-// app/reset.tsx
 import { router } from "expo-router";
+import * as Linking from "expo-linking";
 import React, { useEffect, useState } from "react";
-import { Alert, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { supabase } from "../lib/supabaseClient";
 
 export default function Reset() {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [loading, setLoading] = useState(false);
+  const [checkingLink, setCheckingLink] = useState(true);
 
-  // When the reset link opens the app, Supabase will set a session automatically.
-  // This screen just updates the password for the currently-authenticated user.
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      if (!data.session) {
+    const establishRecoverySession = async (url?: string | null) => {
+      try {
+        const incomingUrl = url ?? (await Linking.getInitialURL());
+
+        if (incomingUrl) {
+          const hash = incomingUrl.includes("#") ? incomingUrl.split("#")[1] : "";
+          const query = incomingUrl.includes("?")
+            ? incomingUrl.split("?")[1].split("#")[0]
+            : "";
+
+          const hashParams = new URLSearchParams(hash);
+          const queryParams = new URLSearchParams(query);
+
+          const accessToken =
+            hashParams.get("access_token") ?? queryParams.get("access_token");
+          const refreshToken =
+            hashParams.get("refresh_token") ?? queryParams.get("refresh_token");
+          const recoveryType =
+            hashParams.get("type") ?? queryParams.get("type");
+
+          if (recoveryType === "recovery" && accessToken && refreshToken) {
+            const { error } = await supabase.auth.setSession({
+              access_token: accessToken,
+              refresh_token: refreshToken,
+            });
+
+            if (error) {
+              throw error;
+            }
+          }
+        }
+
+        const { data } = await supabase.auth.getSession();
+
+        if (!data.session) {
+          Alert.alert(
+            "Reset link not detected",
+            "Please open the password reset link from your email again."
+          );
+          router.replace("/auth");
+        }
+      } catch (error: any) {
         Alert.alert(
-          "Reset link not detected",
-          "Please open the password reset link from your email again."
+          "Reset link error",
+          error?.message ?? "We could not verify your password reset link."
         );
         router.replace("/auth");
+      } finally {
+        setCheckingLink(false);
       }
+    };
+
+    establishRecoverySession();
+
+    const subscription = Linking.addEventListener("url", ({ url }) => {
+      establishRecoverySession(url);
     });
+
+    return () => {
+      subscription.remove();
+    };
   }, []);
 
   const handleUpdatePassword = async () => {
@@ -51,24 +102,33 @@ export default function Reset() {
     <View style={styles.container}>
       <Text style={styles.title}>Set New Password</Text>
 
-      <TextInput
-        value={password}
-        onChangeText={setPassword}
-        placeholder="New password"
-        secureTextEntry
-        style={styles.input}
-      />
-      <TextInput
-        value={confirm}
-        onChangeText={setConfirm}
-        placeholder="Confirm new password"
-        secureTextEntry
-        style={styles.input}
-      />
+      {checkingLink ? (
+        <View style={styles.loadingWrap}>
+          <ActivityIndicator size="large" color="#111" />
+          <Text style={styles.loadingText}>Verifying your reset link...</Text>
+        </View>
+      ) : (
+        <>
+          <TextInput
+            value={password}
+            onChangeText={setPassword}
+            placeholder="New password"
+            secureTextEntry
+            style={styles.input}
+          />
+          <TextInput
+            value={confirm}
+            onChangeText={setConfirm}
+            placeholder="Confirm new password"
+            secureTextEntry
+            style={styles.input}
+          />
 
-      <Pressable onPress={handleUpdatePassword} style={styles.button} disabled={loading}>
-        <Text style={styles.buttonText}>{loading ? "Updating..." : "Update Password"}</Text>
-      </Pressable>
+          <Pressable onPress={handleUpdatePassword} style={styles.button} disabled={loading}>
+            <Text style={styles.buttonText}>{loading ? "Updating..." : "Update Password"}</Text>
+          </Pressable>
+        </>
+      )}
     </View>
   );
 }
@@ -90,4 +150,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#111",
   },
   buttonText: { color: "white", fontWeight: "600" },
+  loadingWrap: { alignItems: "center", paddingVertical: 20 },
+  loadingText: { marginTop: 12, color: "#555", fontSize: 14 },
 });

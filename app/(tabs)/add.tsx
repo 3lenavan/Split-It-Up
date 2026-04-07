@@ -7,6 +7,7 @@
 import { createSplit } from "@/lib/split";
 import { supabase } from "@/lib/supabaseClient";
 import * as Haptics from "expo-haptics";
+import { useIsFocused } from "@react-navigation/native";
 import {
   CheckCircle,
   ChevronDown,
@@ -58,10 +59,20 @@ const C = {
 };
 
 // ── Animated entrance hook ───────────────────────────────────────────────────
-function useFadeSlide(delay = 0) {
+function useFadeSlide(delay = 0, isActive = true) {
   const opacity = useRef(new Animated.Value(0)).current;
   const translateY = useRef(new Animated.Value(22)).current;
+
   useEffect(() => {
+    if (!isActive) {
+      opacity.setValue(0);
+      translateY.setValue(22);
+      return;
+    }
+
+    opacity.setValue(0);
+    translateY.setValue(22);
+
     Animated.parallel([
       Animated.timing(opacity, {
         toValue: 1, duration: 480, delay,
@@ -72,7 +83,7 @@ function useFadeSlide(delay = 0) {
         useNativeDriver: true,
       }),
     ]).start();
-  }, []);
+  }, [delay, isActive, opacity, translateY]);
   return { opacity, transform: [{ translateY }] };
 }
 
@@ -195,6 +206,7 @@ export default function AddScreen({
 }: {
   onSplitCreated?: () => void;
 }) {
+  const isFocused = useIsFocused();
   const [occasionName, setOccasionName] = useState("");
   const [total, setTotal] = useState("");
   const [user, setUser] = useState<any>(null);
@@ -204,11 +216,11 @@ export default function AddScreen({
   const [creating, setCreating] = useState(false);
 
   // entrance animations
-  const headerAnim = useFadeSlide(0);
-  const card1Anim = useFadeSlide(80);
-  const card2Anim = useFadeSlide(160);
-  const card3Anim = useFadeSlide(240);
-  const btnAnim = useFadeSlide(320);
+  const headerAnim = useFadeSlide(0, isFocused);
+  const card1Anim = useFadeSlide(80, isFocused);
+  const card2Anim = useFadeSlide(160, isFocused);
+  const card3Anim = useFadeSlide(240, isFocused);
+  const btnAnim = useFadeSlide(320, isFocused);
 
   // button press scale
   const btnScale = useRef(new Animated.Value(1)).current;
@@ -285,7 +297,7 @@ export default function AddScreen({
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <SafeAreaView style={styles.safe}>
+      <SafeAreaView edges={["top", "left", "right"]} style={styles.safe}>
         {/* background orbs */}
         <FloatingOrb style={styles.orb1} />
         <FloatingOrb style={styles.orb2} />
@@ -519,7 +531,7 @@ export default function AddScreen({
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: C.bg },
-  scroll: { paddingHorizontal: 16, paddingTop: 20, paddingBottom: 56 },
+  scroll: { paddingHorizontal: 16, paddingTop: 20, paddingBottom: 140 },
 
   // background orbs
   orb1: {
