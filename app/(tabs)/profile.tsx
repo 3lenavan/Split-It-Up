@@ -1,33 +1,11 @@
 import { supabase } from "@/lib/supabaseClient";
+import { useAppTheme } from "@/lib/app-theme";
 import { useIsFocused } from "@react-navigation/native";
 import { router } from "expo-router";
-import { LinearGradient } from "expo-linear-gradient";
-import { Check, ChevronDown, ChevronUp, LogOut, Search, Sparkles, UserPlus, X } from "lucide-react-native";
+import { Check, ChevronDown, ChevronUp, Search, Settings2, Sparkles, UserPlus, X } from "lucide-react-native";
 import { useEffect, useRef, useState } from "react";
-import { Alert, Animated, LayoutAnimation, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, UIManager, View } from "react-native";
+import { Animated, Keyboard, LayoutAnimation, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableWithoutFeedback, UIManager, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-
-const C = {
-  bg: "#07070f",
-  surface: "#0f0f1a",
-  card: "#141420",
-  cardBright: "#1c1c2e",
-  border: "#252538",
-  borderBright: "#353550",
-  accent: "#a855f7",
-  accentDim: "#a855f730",
-  accentBright: "#d8b4fe",
-  accentDeep: "#7c3aed",
-  green: "#22d3a5",
-  greenDim: "#22d3a518",
-  red: "#f43f5e",
-  redDim: "#f43f5e18",
-  amber: "#fbbf24",
-  amberDim: "#fbbf2418",
-  textPrimary: "#f0eeff",
-  textSecondary: "#9b99ba",
-  textMuted: "#6b6884",
-};
 
 function useFadeSlide(delay = 0, isActive = true) {
   const opacity = useRef(new Animated.Value(0)).current;
@@ -77,11 +55,13 @@ function MetricCard({
   value,
   tone = "accent",
   onPress,
+  styles,
 }: {
   label: string;
   value: string;
   tone?: "accent" | "green" | "red";
   onPress?: () => void;
+  styles: ReturnType<typeof createStyles>;
 }) {
   const toneStyles =
     tone === "green"
@@ -115,7 +95,17 @@ function MetricCard({
   return <View style={[styles.metricCard, toneStyles.card]}>{content}</View>;
 }
 
-function SectionHeader({ eyebrow, title, badge }: { eyebrow: string; title: string; badge?: string }) {
+function SectionHeader({
+  eyebrow,
+  title,
+  badge,
+  styles,
+}: {
+  eyebrow: string;
+  title: string;
+  badge?: string;
+  styles: ReturnType<typeof createStyles>;
+}) {
   return (
     <View style={styles.sectionHeader}>
       <View>
@@ -133,7 +123,8 @@ function SectionHeader({ eyebrow, title, badge }: { eyebrow: string; title: stri
 
 export default function ProfileScreen() {
   const isFocused = useIsFocused();
-  const logoutTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const { palette: C } = useAppTheme();
+  const styles = createStyles(C);
   const scrollRef = useRef<ScrollView>(null);
   const friendsSectionY = useRef(0);
   const [searchText, setSearchText] = useState("");
@@ -145,7 +136,6 @@ export default function ProfileScreen() {
   const [youreOwed, setYoureOwed] = useState(0);
   const [youOwe, setYouOwe] = useState(0);
   const [friendsExpanded, setFriendsExpanded] = useState(true);
-  const [logoutPhase, setLogoutPhase] = useState<"idle" | "farewell">("idle");
 
   const headerAnim = useFadeSlide(0, isFocused);
   const heroAnim = useFadeSlide(80, isFocused);
@@ -166,16 +156,6 @@ export default function ProfileScreen() {
       UIManager.setLayoutAnimationEnabledExperimental(true);
     }
   }, []);
-
-  useEffect(() => {
-    return () => {
-      logoutTimers.current.forEach(clearTimeout);
-      logoutTimers.current = [];
-    };
-  }, []);
-
-  const pressLogoutIn = () => Animated.spring(logoutScale, { toValue: 0.97, tension: 280, friction: 10, useNativeDriver: true }).start();
-  const pressLogoutOut = () => Animated.spring(logoutScale, { toValue: 1, tension: 280, friction: 10, useNativeDriver: true }).start();
 
   const loadProfile = async () => {
     const { data: { session }, error: sessionError } = await supabase.auth.getSession();
@@ -252,13 +232,15 @@ export default function ProfileScreen() {
   };
 
   useEffect(() => {
+    if (!isFocused) return;
+
     loadProfile();
     loadPendingRequests();
     loadMoneyRequests();
     loadSentRequests();
     loadFriends();
     loadBalances();
-  }, []);
+  }, [isFocused]);
 
   const handleSearch = async () => {
     console.log("Search button pressed");
@@ -388,47 +370,6 @@ const handleDeclineMoneyRequest = async (requestId: string) => {
     await loadPendingRequests();
   };
 
-  const handleLogout = async () => {
-    Alert.alert("Log Out", "Are you sure you want to log out?", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Log Out",
-        style: "destructive",
-        onPress: () => {
-          farewellOpacity.setValue(0);
-          farewellScale.setValue(0.94);
-          farewellSlide.setValue(20);
-          farewellGlow.setValue(1);
-          farewellProgress.setValue(0);
-          setLogoutPhase("farewell");
-
-          Animated.parallel([
-            Animated.timing(farewellOpacity, { toValue: 1, duration: 320, useNativeDriver: true }),
-            Animated.spring(farewellScale, { toValue: 1, tension: 85, friction: 12, useNativeDriver: true }),
-            Animated.spring(farewellSlide, { toValue: 0, tension: 85, friction: 12, useNativeDriver: true }),
-            Animated.timing(farewellProgress, { toValue: 1, duration: 1550, useNativeDriver: false }),
-            Animated.loop(
-              Animated.sequence([
-                Animated.timing(farewellGlow, { toValue: 1.08, duration: 800, useNativeDriver: true }),
-                Animated.timing(farewellGlow, { toValue: 1, duration: 800, useNativeDriver: true }),
-              ])
-            ),
-          ]).start();
-
-          logoutTimers.current.push(
-            setTimeout(async () => {
-              await supabase.auth.signOut();
-              router.replace("/auth");
-            }, 1650),
-            setTimeout(() => {
-              setLogoutPhase("idle");
-            }, 1850)
-          );
-        },
-      },
-    ]);
-  };
-
   const scrollToFriendsSection = () => {
     if (!friendsExpanded) {
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -490,14 +431,24 @@ const handleDeclineMoneyRequest = async (requestId: string) => {
     })) ?? []
   );
 };
+  const openSettings = () => {
+    router.push("/settings" as any);
+  };
 
   const profileInitial = profile.name ? profile.name.charAt(0).toUpperCase() : "?";
 
   return (
+    <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
     <SafeAreaView edges={["top", "left", "right"]} style={styles.safeArea}>
       <FloatingOrb style={styles.orb1} />
       <FloatingOrb style={styles.orb2} />
-      <ScrollView ref={scrollRef} contentContainerStyle={styles.container} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        ref={scrollRef}
+        contentContainerStyle={styles.container}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="never"
+        keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+      >
         <Animated.View style={[styles.header, headerAnim]}>
           <View style={styles.headerLeft}>
             <View style={styles.sparkleWrap}><Sparkles size={18} color={C.accent} /></View>
@@ -506,7 +457,12 @@ const handleDeclineMoneyRequest = async (requestId: string) => {
               <Text style={styles.headerTitle}>Profile</Text>
             </View>
           </View>
-          <View style={styles.headerBadge}><Text style={styles.headerBadgeText}>{friends.length} connected</Text></View>
+          <View style={styles.headerRight}>
+            <View style={styles.headerBadge}><Text style={styles.headerBadgeText}>{friends.length} connected</Text></View>
+            <Pressable style={styles.settingsButton} onPress={openSettings}>
+              <Settings2 size={17} color={C.textPrimary} />
+            </Pressable>
+          </View>
         </Animated.View>
 
         <Animated.View style={[styles.heroCard, heroAnim]}>
@@ -528,13 +484,15 @@ const handleDeclineMoneyRequest = async (requestId: string) => {
                 value={`${friends.length}`}
                 tone="accent"
                 onPress={scrollToFriendsSection}
+                styles={styles}
               />
             </View>
             <View style={styles.metricSlot}>
               <MetricCard
-                label="You're owed"
+                label="You are owed"
                 value={`$${youreOwed.toFixed(2)}`}
                 tone="green"
+                styles={styles}
               />
             </View>
             <View style={styles.metricSlot}>
@@ -542,13 +500,14 @@ const handleDeclineMoneyRequest = async (requestId: string) => {
                 label="You owe"
                 value={`$${youOwe.toFixed(2)}`}
                 tone="red"
+                styles={styles}
               />
             </View>
           </View>
         </Animated.View>
 
         <Animated.View style={[styles.glassCard, searchAnim]}>
-          <SectionHeader eyebrow="Discover" title="Add New Friend" badge={`${searchResults.length} found`} />
+          <SectionHeader eyebrow="Discover" title="Add New Friend" badge={`${searchResults.length} found`} styles={styles} />
           <View style={styles.searchBox}>
             <Search size={18} color={C.textSecondary} style={styles.searchIcon} />
             <TextInput
@@ -591,8 +550,13 @@ const handleDeclineMoneyRequest = async (requestId: string) => {
           ))}
         </Animated.View>
 
-        <Animated.View style={[styles.glassCard, pendingAnim]}>
-          <SectionHeader eyebrow="Inbox" title="Pending Requests" badge={`${pendingRequests.length}`} />
+      <Animated.View style={[styles.glassCard, pendingAnim]}>
+  <SectionHeader
+    eyebrow="Inbox"
+    title="Money Requests"
+    badge={`${moneyRequests.length}`}
+    styles={styles}
+  />
           {pendingRequests.length === 0 ? (
             <View style={styles.emptyState}>
               <Text style={styles.emptyTitle}>No pending requests</Text>
@@ -616,7 +580,12 @@ const handleDeclineMoneyRequest = async (requestId: string) => {
         </Animated.View>
 
       <Animated.View style={[styles.glassCard, pendingAnim]}>
-  <SectionHeader eyebrow="Inbox" title="Money Requests" badge={`${moneyRequests.length}`} />
+  <SectionHeader
+  eyebrow="Inbox"
+  title="Money Requests"
+  badge={`${moneyRequests.length}`}
+  styles={styles}
+/>
   {moneyRequests.length === 0 ? (
     <View style={styles.emptyState}>
       <Text style={styles.emptyTitle}>No pending money requests</Text>
@@ -663,9 +632,8 @@ const handleDeclineMoneyRequest = async (requestId: string) => {
           }}
         >
           <View style={styles.friendsSectionTop}>
-            <SectionHeader eyebrow="Circle" title={`Your Friends (${friends.length})`} badge="Synced" />
+            <SectionHeader eyebrow="Circle" title={`Your Friends (${friends.length})`} badge="Synced" styles={styles} />
             <Pressable
-              style={styles.collapseToggle}
               onPress={toggleFriendsExpanded}
             >
               <Text style={styles.collapseToggleText}>
@@ -705,72 +673,26 @@ const handleDeclineMoneyRequest = async (requestId: string) => {
             </View>
           ) : null}
         </Animated.View>
-
-        <Animated.View style={logoutAnim}>
-          <Animated.View style={{ transform: [{ scale: logoutScale }] }}>
-            <Pressable style={styles.logoutButton} onPress={handleLogout} onPressIn={pressLogoutIn} onPressOut={pressLogoutOut}>
-              <View style={styles.logoutGlow} />
-              <LogOut size={18} color="#fff" />
-              <Text style={styles.logoutText}>Log Out</Text>
-            </Pressable>
-          </Animated.View>
-        </Animated.View>
       </ScrollView>
-
-      {logoutPhase !== "idle" ? (
-        <Animated.View pointerEvents="auto" style={[styles.logoutOverlay, { opacity: farewellOpacity }]}>
-          <Animated.View style={[styles.logoutBackdropGlow, { transform: [{ scale: farewellGlow }] }]} />
-          <View style={styles.logoutBackdropGlowSecondary} />
-          <Animated.View style={[styles.logoutFarewellCard, { transform: [{ scale: farewellScale }, { translateY: farewellSlide }] }]}>
-            <LinearGradient
-              colors={["#f97316", "#fb7185", "#a855f7"]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.logoutFarewellBadge}
-            >
-              <Text style={styles.logoutFarewellBadgeText}>
-                {(profile.name || profile.username || "S").charAt(0).toUpperCase()}
-              </Text>
-            </LinearGradient>
-            <Text style={styles.logoutFarewellEyebrow}>Signed out</Text>
-            <Text style={styles.logoutFarewellTitle}>
-              See you soon, {profile.name || profile.username || "friend"}
-            </Text>
-            <Text style={styles.logoutFarewellSubtitle}>
-              We will keep things ready for your next split.
-            </Text>
-            <View style={styles.logoutFarewellTrack}>
-              <Animated.View
-                style={[
-                  styles.logoutFarewellFill,
-                  {
-                    width: farewellProgress.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: ["0%", "100%"],
-                    }),
-                  },
-                ]}
-              />
-            </View>
-          </Animated.View>
-        </Animated.View>
-      ) : null}
     </SafeAreaView>
+    </TouchableWithoutFeedback>
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (C: ReturnType<typeof useAppTheme>["palette"]) => StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: C.bg },
   container: { paddingHorizontal: 16, paddingTop: 20, paddingBottom: 140 },
-  orb1: { position: "absolute", width: 300, height: 300, borderRadius: 150, backgroundColor: "#7c3aed", top: -90, right: -80 },
-  orb2: { position: "absolute", width: 220, height: 220, borderRadius: 110, backgroundColor: "#4f46e5", bottom: 140, left: -70 },
+  orb1: { position: "absolute", width: 300, height: 300, borderRadius: 150, backgroundColor: C.orbPrimary, top: -90, right: -80 },
+  orb2: { position: "absolute", width: 220, height: 220, borderRadius: 110, backgroundColor: C.orbSecondary, bottom: 140, left: -70 },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 24 },
   headerLeft: { flexDirection: "row", alignItems: "center", gap: 12 },
+  headerRight: { flexDirection: "row", alignItems: "center", gap: 10 },
   sparkleWrap: { width: 44, height: 44, borderRadius: 14, backgroundColor: C.accentDim, justifyContent: "center", alignItems: "center", borderWidth: 1, borderColor: `${C.accent}55` },
   headerEyebrow: { fontSize: 11, fontWeight: "700", color: C.textSecondary, textTransform: "uppercase", letterSpacing: 1.2 },
   headerTitle: { fontSize: 28, fontWeight: "800", color: C.textPrimary, letterSpacing: -0.8, marginTop: -2 },
   headerBadge: { backgroundColor: C.card, borderRadius: 999, borderWidth: 1, borderColor: C.border, paddingHorizontal: 12, paddingVertical: 8 },
   headerBadgeText: { color: C.textSecondary, fontSize: 11, fontWeight: "700" },
+  settingsButton: { width: 42, height: 42, borderRadius: 14, backgroundColor: C.card, borderWidth: 1, borderColor: C.border, justifyContent: "center", alignItems: "center" },
   heroCard: { backgroundColor: C.cardBright, borderRadius: 26, borderWidth: 1, borderColor: C.borderBright, padding: 20, marginBottom: 14, overflow: "hidden" },
   heroGlow: { position: "absolute", top: 0, left: "12%", right: "12%", height: 1, backgroundColor: C.accent, opacity: 0.25 },
   profileHeader: { flexDirection: "row", alignItems: "center", marginBottom: 18 },
@@ -877,18 +799,4 @@ const styles = StyleSheet.create({
   emptyState: { backgroundColor: C.surface, borderRadius: 16, borderWidth: 1, borderColor: C.border, paddingVertical: 22, paddingHorizontal: 16, alignItems: "center" },
   emptyTitle: { fontSize: 14, fontWeight: "700", color: C.textPrimary, textAlign: "center" },
   emptySubtitle: { fontSize: 12, color: C.textSecondary, textAlign: "center", marginTop: 6, lineHeight: 18 },
-  logoutButton: { flexDirection: "row", alignItems: "center", justifyContent: "center", backgroundColor: C.red, borderRadius: 18, paddingVertical: 16, marginTop: 6, overflow: "hidden", shadowColor: C.red, shadowOpacity: 0.35, shadowRadius: 16, shadowOffset: { width: 0, height: 6 }, elevation: 6 },
-  logoutGlow: { position: "absolute", top: 0, left: "12%", right: "12%", height: 1, backgroundColor: "#fff", opacity: 0.25 },
-  logoutText: { color: "#fff", fontSize: 15, fontWeight: "800", marginLeft: 8 },
-  logoutOverlay: { ...StyleSheet.absoluteFillObject, justifyContent: "center", alignItems: "center", backgroundColor: "rgba(7, 7, 15, 0.76)", paddingHorizontal: 24 },
-  logoutBackdropGlow: { position: "absolute", width: 300, height: 300, borderRadius: 150, backgroundColor: "rgba(248, 113, 113, 0.18)" },
-  logoutBackdropGlowSecondary: { position: "absolute", width: 180, height: 180, borderRadius: 90, backgroundColor: "rgba(168, 85, 247, 0.14)", bottom: "35%" },
-  logoutFarewellCard: { width: "100%", maxWidth: 332, borderRadius: 30, paddingHorizontal: 24, paddingVertical: 30, backgroundColor: "rgba(15, 14, 36, 0.96)", borderWidth: 1, borderColor: "rgba(255,255,255,0.10)", alignItems: "center" },
-  logoutFarewellBadge: { width: 72, height: 72, borderRadius: 36, alignItems: "center", justifyContent: "center", marginBottom: 18 },
-  logoutFarewellBadgeText: { color: "#fff", fontSize: 30, fontWeight: "900" },
-  logoutFarewellEyebrow: { color: "rgba(251, 113, 133, 0.82)", fontSize: 12, fontWeight: "700", textTransform: "uppercase", letterSpacing: 1.1, marginBottom: 10 },
-  logoutFarewellTitle: { color: "#fff", fontSize: 28, fontWeight: "800", letterSpacing: -0.8, textAlign: "center", marginBottom: 8 },
-  logoutFarewellSubtitle: { color: "rgba(255,255,255,0.62)", fontSize: 14, lineHeight: 20, textAlign: "center", marginBottom: 20 },
-  logoutFarewellTrack: { width: "100%", height: 7, borderRadius: 999, overflow: "hidden", backgroundColor: "rgba(255,255,255,0.08)" },
-  logoutFarewellFill: { height: "100%", backgroundColor: "#fb7185" },
 });

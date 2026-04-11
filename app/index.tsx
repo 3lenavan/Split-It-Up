@@ -1,6 +1,7 @@
 import { Redirect } from "expo-router";
+import { LinearGradient } from "expo-linear-gradient";
 import { useEffect, useState } from "react";
-import { ActivityIndicator, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 import { supabase } from "../lib/supabaseClient";
 
 export default function Index() {
@@ -26,8 +27,8 @@ export default function Index() {
 
   if (loading) {
     return (
-      <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
-        <ActivityIndicator />
+      <View style={styles.root}>
+        <LinearGradient colors={["#0F0C29", "#1a1a4e", "#24243e"]} style={StyleSheet.absoluteFillObject} />
       </View>
     );
   }
@@ -35,3 +36,10 @@ export default function Index() {
   // If logged in -> go to tabs. If not -> go to auth screen.
   return signedIn ? <Redirect href="/(tabs)" /> : <Redirect href="/auth" />;
 }
+
+const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+    backgroundColor: "#0F0C29",
+  },
+});

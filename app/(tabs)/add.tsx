@@ -5,6 +5,7 @@
  * built-in Animated API (no extra deps needed).
  *****************************************************************************/
 import { createSplit } from "@/lib/split";
+import { THEME_PALETTES, useAppTheme } from "@/lib/app-theme";
 import { supabase } from "@/lib/supabaseClient";
 import * as Haptics from "expo-haptics";
 import { useIsFocused } from "@react-navigation/native";
@@ -21,11 +22,14 @@ import { useEffect, useRef, useState } from "react";
 import {
   Alert,
   Animated,
+  Keyboard,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
+  TouchableWithoutFeedback,
   View,
 } from "react-native";
 import {
@@ -35,28 +39,11 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 // ── Palette ──────────────────────────────────────────────────────────────────
-const C = {
-  bg: "#07070f",
-  surface: "#0f0f1a",
-  card: "#141420",
-  cardBright: "#1c1c2e",
-  border: "#252538",
-  borderBright: "#353550",
-  accent: "#a855f7",
-  accentDim: "#a855f730",
+let C = {
+  ...THEME_PALETTES.dark,
   accentGlow: "#a855f750",
-  accentBright: "#d8b4fe",
-  accentDeep: "#7c3aed",
-  green: "#22d3a5",
-  greenDim: "#22d3a518",
-  red: "#f43f5e",
-  redDim: "#f43f5e18",
-  amber: "#fbbf24",
-  amberDim: "#fbbf2418",
-  textPrimary: "#f0eeff",
-  textSecondary: "#7c7c9e",
-  textMuted: "#3a3a52",
 };
+let styles = createStyles(C);
 
 // ── Animated entrance hook ───────────────────────────────────────────────────
 function useFadeSlide(delay = 0, isActive = true) {
@@ -206,6 +193,9 @@ export default function AddScreen({
 }: {
   onSplitCreated?: () => void;
 }) {
+  const { palette } = useAppTheme();
+  C = { ...palette, accentGlow: `${palette.accent}50` };
+  styles = createStyles(C);
   const isFocused = useIsFocused();
   const [occasionName, setOccasionName] = useState("");
   const [total, setTotal] = useState("");
@@ -297,6 +287,7 @@ export default function AddScreen({
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
       <SafeAreaView edges={["top", "left", "right"]} style={styles.safe}>
         {/* background orbs */}
         <FloatingOrb style={styles.orb1} />
@@ -305,7 +296,8 @@ export default function AddScreen({
         <ScrollView
           contentContainerStyle={styles.scroll}
           showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
+          keyboardShouldPersistTaps="never"
+          keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
         >
           {/* ── HEADER ── */}
           <Animated.View style={[styles.header, headerAnim]}>
@@ -525,11 +517,13 @@ export default function AddScreen({
           </Animated.View>
         </ScrollView>
       </SafeAreaView>
+      </TouchableWithoutFeedback>
     </GestureHandlerRootView>
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(C: typeof THEME_PALETTES.dark & { accentGlow: string }) {
+return StyleSheet.create({
   safe: { flex: 1, backgroundColor: C.bg },
   scroll: { paddingHorizontal: 16, paddingTop: 20, paddingBottom: 140 },
 
@@ -761,3 +755,4 @@ const styles = StyleSheet.create({
     color: "#fff", fontSize: 17, fontWeight: "800", letterSpacing: 0.2,
   },
 });
+}
