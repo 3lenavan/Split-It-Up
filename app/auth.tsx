@@ -25,6 +25,7 @@ import { THEME_PALETTES } from '../lib/app-theme'
 import { supabase } from '../lib/supabaseClient'
 
 const { width, height } = Dimensions.get('window')
+const INTRO_LOGO_SETTLED_Y = -(height * 0.31)
 const INTRO_MESSAGES = [
   'Split bills. Not friendships.',
   'Keep every expense clean and easy.',
@@ -33,11 +34,21 @@ const INTRO_MESSAGES = [
   'Sort out expenses in seconds.',
   'Stay on top of every shared bill.',
 ]
+const INTRO_BOTTOM_MESSAGES = [
+  'Remember to drink water. Your organs are doing unpaid labor.',
+  'Hope you did something fun today. If not, this intro counts a little.',
+  'Tiny reminder: future you loves when present you taps buttons carefully.',
+  'Stretch your neck. The shrimp posture lobby has enough power.',
+  'If today was chaotic, at least the bills can be organized.',
+  'Blink twice. Screens are sneaky little rectangles.',
+  'Text that friend back. Or pretend this message never happened.',
+  'You made it here. The app is already impressed, quietly.',
+]
 let hasPlayedAuthIntro = false
 
-const pickIntroMessage = (current?: string) => {
-  const options = INTRO_MESSAGES.filter((message) => message !== current)
-  const pool = options.length > 0 ? options : INTRO_MESSAGES
+const pickRandomMessage = (messages: string[], current?: string) => {
+  const options = messages.filter((message) => message !== current)
+  const pool = options.length > 0 ? options : messages
   return pool[Math.floor(Math.random() * pool.length)]
 }
 
@@ -51,7 +62,8 @@ export default function AuthScreen() {
   const [password, setPassword] = useState('')
   const [sessionEmail, setSessionEmail] = useState<string | null>(null)
   const [welcomeName, setWelcomeName] = useState('')
-  const [introMessage, setIntroMessage] = useState(() => pickIntroMessage())
+  const [introMessage, setIntroMessage] = useState(() => pickRandomMessage(INTRO_MESSAGES))
+  const [introBottomMessage, setIntroBottomMessage] = useState(() => pickRandomMessage(INTRO_BOTTOM_MESSAGES))
   const [showIntro, setShowIntro] = useState(true)
   const [entryPhase, setEntryPhase] = useState<'idle' | 'success' | 'loading'>('idle')
   const [loading, setLoading] = useState(false)
@@ -68,11 +80,13 @@ export default function AuthScreen() {
   const titleSlideAnim = useRef(new Animated.Value(-50)).current
   const logoFloatAnim = useRef(new Animated.Value(0)).current
   const introOverlayOpacity = useRef(new Animated.Value(1)).current
-  const introLogoTranslateY = useRef(new Animated.Value(0)).current
-  const introLogoScale = useRef(new Animated.Value(1)).current
-  const introLogoOpacity = useRef(new Animated.Value(1)).current
-  const introWelcomeOpacity = useRef(new Animated.Value(1)).current
-  const introWelcomeShift = useRef(new Animated.Value(0)).current
+  const introLogoTranslateY = useRef(new Animated.Value(height * 0.18)).current
+  const introLogoScale = useRef(new Animated.Value(0.82)).current
+  const introLogoOpacity = useRef(new Animated.Value(0)).current
+  const introWelcomeOpacity = useRef(new Animated.Value(0)).current
+  const introWelcomeShift = useRef(new Animated.Value(18)).current
+  const introBottomOpacity = useRef(new Animated.Value(0)).current
+  const introBottomShift = useRef(new Animated.Value(16)).current
   const introContentOpacity = useRef(new Animated.Value(0)).current
   const introContentShift = useRef(new Animated.Value(22)).current
   const authExitOpacity = useRef(new Animated.Value(1)).current
@@ -115,7 +129,9 @@ export default function AuthScreen() {
       introContentShift.setValue(0)
       introLogoOpacity.setValue(0)
       introWelcomeOpacity.setValue(0)
-      introWelcomeShift.setValue(10)
+      introWelcomeShift.setValue(18)
+      introBottomOpacity.setValue(0)
+      introBottomShift.setValue(16)
       return
     }
 
@@ -126,71 +142,142 @@ export default function AuthScreen() {
       introContentShift.setValue(0)
       introLogoOpacity.setValue(0)
       introWelcomeOpacity.setValue(0)
-      introWelcomeShift.setValue(10)
+      introWelcomeShift.setValue(18)
+      introBottomOpacity.setValue(0)
+      introBottomShift.setValue(16)
       return
     }
 
     setShowIntro(true)
     hasPlayedAuthIntro = true
-    setIntroMessage((current) => pickIntroMessage(current))
+    setIntroMessage((current) => pickRandomMessage(INTRO_MESSAGES, current))
+    setIntroBottomMessage((current) => pickRandomMessage(INTRO_BOTTOM_MESSAGES, current))
     introOverlayOpacity.setValue(1)
-    introLogoTranslateY.setValue(0)
-    introLogoScale.setValue(1)
-    introLogoOpacity.setValue(1)
-    introWelcomeOpacity.setValue(1)
-    introWelcomeShift.setValue(0)
+    introLogoTranslateY.setValue(height * 0.18)
+    introLogoScale.setValue(0.82)
+    introLogoOpacity.setValue(0)
+    introWelcomeOpacity.setValue(0)
+    introWelcomeShift.setValue(18)
+    introBottomOpacity.setValue(0)
+    introBottomShift.setValue(16)
     introContentOpacity.setValue(0)
-    introContentShift.setValue(22)
+    introContentShift.setValue(28)
 
-    const startTimer = setTimeout(() => {
+    const logoTimer = setTimeout(() => {
+      Animated.parallel([
+        Animated.spring(introLogoTranslateY, {
+          toValue: 0,
+          tension: 56,
+          friction: 6,
+          useNativeDriver: true,
+        }),
+        Animated.spring(introLogoScale, {
+          toValue: 1,
+          tension: 70,
+          friction: 5,
+          useNativeDriver: true,
+        }),
+        Animated.timing(introLogoOpacity, {
+          toValue: 1,
+          duration: 240,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+      ]).start()
+    }, 260)
+
+    const messageTimer = setTimeout(() => {
+      Animated.parallel([
+        Animated.timing(introWelcomeOpacity, {
+          toValue: 1,
+          duration: 460,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(introWelcomeShift, {
+          toValue: 0,
+          duration: 460,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+      ]).start()
+    }, 980)
+
+    const bottomTimer = setTimeout(() => {
+      Animated.parallel([
+        Animated.timing(introBottomOpacity, {
+          toValue: 1,
+          duration: 520,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(introBottomShift, {
+          toValue: 0,
+          duration: 520,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+      ]).start()
+    }, 1620)
+
+    const settleTimer = setTimeout(() => {
       Animated.parallel([
         Animated.timing(introLogoTranslateY, {
-          toValue: -(height * 0.235),
-          duration: 1120,
+          toValue: INTRO_LOGO_SETTLED_Y,
+          duration: 1020,
           easing: Easing.inOut(Easing.cubic),
           useNativeDriver: true,
         }),
         Animated.timing(introLogoScale, {
           toValue: 0.9,
-          duration: 1120,
+          duration: 1020,
           easing: Easing.inOut(Easing.cubic),
-          useNativeDriver: true,
-        }),
-        Animated.timing(introLogoOpacity, {
-          toValue: 0.78,
-          duration: 900,
-          delay: 120,
-          easing: Easing.out(Easing.cubic),
           useNativeDriver: true,
         }),
         Animated.timing(introWelcomeOpacity, {
           toValue: 0,
-          duration: 360,
+          duration: 340,
+          delay: 120,
           easing: Easing.out(Easing.cubic),
           useNativeDriver: true,
         }),
         Animated.timing(introWelcomeShift, {
-          toValue: 14,
+          toValue: -12,
+          duration: 340,
+          delay: 120,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(introBottomOpacity, {
+          toValue: 0,
           duration: 360,
+          delay: 360,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(introBottomShift, {
+          toValue: 10,
+          duration: 360,
+          delay: 360,
           easing: Easing.out(Easing.cubic),
           useNativeDriver: true,
         }),
         Animated.timing(introContentOpacity, {
           toValue: 1,
-          duration: 760,
+          duration: 780,
           delay: 520,
           easing: Easing.out(Easing.cubic),
           useNativeDriver: true,
         }),
         Animated.timing(introContentShift, {
           toValue: 0,
-          duration: 760,
+          duration: 780,
           delay: 520,
           easing: Easing.out(Easing.cubic),
           useNativeDriver: true,
         }),
       ]).start()
-    }, 880)
+    }, 2780)
 
     const finishTimer = setTimeout(() => {
       Animated.timing(introOverlayOpacity, {
@@ -199,15 +286,20 @@ export default function AuthScreen() {
         easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
       }).start(() => setShowIntro(false))
-    }, 2500)
+    }, 4720)
 
-    introTimers.current.push(startTimer, finishTimer)
+    introTimers.current.push(logoTimer, messageTimer, bottomTimer, settleTimer, finishTimer)
 
     return () => {
-      clearTimeout(startTimer)
+      clearTimeout(logoTimer)
+      clearTimeout(messageTimer)
+      clearTimeout(bottomTimer)
+      clearTimeout(settleTimer)
       clearTimeout(finishTimer)
     }
   }, [
+    introBottomOpacity,
+    introBottomShift,
     introContentOpacity,
     introContentShift,
     introLogoScale,
@@ -625,10 +717,20 @@ export default function AuthScreen() {
             ]}
           >
             <View style={styles.introTextWrap}>
-              <Text style={styles.introEyebrow}>Welcome to</Text>
-              <Text style={styles.introHeadline}>Split It Up</Text>
+              <Text style={styles.introEyebrow}>Ready when you are</Text>
               <Text style={styles.introSubtitle}>{introMessage}</Text>
             </View>
+          </Animated.View>
+          <Animated.View
+            style={[
+              styles.introBottomNote,
+              {
+                opacity: introBottomOpacity,
+                transform: [{ translateY: introBottomShift }],
+              },
+            ]}
+          >
+            <Text style={styles.introBottomText}>{introBottomMessage}</Text>
           </Animated.View>
         </Animated.View>
       )}
@@ -762,21 +864,21 @@ const createStyles = (C: typeof THEME_PALETTES.dark) => StyleSheet.create({
   introLogoWrap: {
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 30,
+    marginBottom: 24,
   },
   introMessageCard: {
     width: '100%',
-    maxWidth: 312,
-    borderRadius: 26,
-    paddingHorizontal: 22,
-    paddingVertical: 18,
-    backgroundColor: C.mode === 'dark' ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.72)',
+    maxWidth: 320,
+    borderRadius: 22,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    backgroundColor: C.mode === 'dark' ? 'rgba(255,255,255,0.055)' : 'rgba(255,255,255,0.72)',
     borderWidth: 1,
     borderColor: C.mode === 'dark' ? 'rgba(255,255,255,0.10)' : 'rgba(24,24,38,0.08)',
     shadowColor: C.mode === 'dark' ? '#0B0918' : '#c7d2fe',
-    shadowOpacity: 0.18,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.16,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
     elevation: 8,
   },
   introTextWrap: {
@@ -788,19 +890,32 @@ const createStyles = (C: typeof THEME_PALETTES.dark) => StyleSheet.create({
     fontWeight: '700',
     textTransform: 'uppercase',
     letterSpacing: 1.4,
-    marginBottom: 10,
-  },
-  introHeadline: {
-    color: C.textPrimary,
-    fontSize: 34,
-    fontWeight: '800',
-    letterSpacing: -1,
-    marginBottom: 10,
+    marginBottom: 8,
   },
   introSubtitle: {
     color: C.textSecondary,
-    fontSize: 15,
-    lineHeight: 22,
+    fontSize: 17,
+    fontWeight: '700',
+    lineHeight: 24,
+    textAlign: 'center',
+  },
+  introBottomNote: {
+    position: 'absolute',
+    left: 28,
+    right: 28,
+    bottom: Platform.OS === 'ios' ? 58 : 42,
+    borderRadius: 18,
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    backgroundColor: C.mode === 'dark' ? 'rgba(255,255,255,0.045)' : 'rgba(255,255,255,0.72)',
+    borderWidth: 1,
+    borderColor: C.mode === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(24,24,38,0.08)',
+  },
+  introBottomText: {
+    color: C.mode === 'dark' ? 'rgba(255,255,255,0.72)' : C.textSecondary,
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 19,
     textAlign: 'center',
   },
 
