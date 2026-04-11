@@ -11,16 +11,20 @@ import { useEffect, useRef, useState } from "react";
 import {
   Alert,
   Animated,
+  AppState,
   Keyboard,
   KeyboardAvoidingView,
+  LayoutAnimation,
   Modal,
   Platform,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableWithoutFeedback,
+  UIManager,
   View,
 } from "react-native";
 import { Swipeable } from "react-native-gesture-handler";
@@ -30,11 +34,37 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type Friend = { id: string; name: string; balance: number };
-type Split = { id: string; title: string; total_amount: number; created_at: string; creator_id: string; myBalance: number; friends: Friend[] };
+type Split = {
+  id: string;
+  title: string;
+  total_amount: number;
+  created_at: string;
+  creator_id: string;
+  myBalance: number;
+  friends: Friend[];
+  paymentRequested?: boolean;
+};
 type EditableMember = { id: string; full_name: string; username: string; shareAmount: number; shareAmountInput: string };
 type AvailableFriend = { id: string; full_name: string; username: string };
 type HomePalette = typeof THEME_PALETTES.dark;
 type HomeStyles = ReturnType<typeof createStyles>;
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const isUuid = (value?: string | null) => !!value && UUID_RE.test(value);
+const splitDeleteAnimation = {
+  duration: 280,
+  create: {
+    type: LayoutAnimation.Types.easeInEaseOut,
+    property: LayoutAnimation.Properties.opacity,
+  },
+  update: {
+    type: LayoutAnimation.Types.easeInEaseOut,
+  },
+  delete: {
+    type: LayoutAnimation.Types.easeInEaseOut,
+    property: LayoutAnimation.Properties.scaleY,
+  },
+};
 
 // ── Animated entrance hook ────────────────────────────────────────────────────
 function useFadeSlide(delay = 0, isActive = true) {
@@ -98,7 +128,7 @@ function SplitCard({ split, currentUserId, onMenuOpen, onDelete, onRequestPaymen
   const hasFriends = split.friends.length > 0;
   const MAX_BADGES = 3;
   const isOwner = currentUserId === split.creator_id;
-  const canRequestPayment = !isOwner && split.myBalance < 0;
+  const canRequestPayment = !isOwner && split.myBalance < -0.005;
 
   const statusColor = owedToYou > 0 ? C.green : youOwe > 0 ? C.red : C.textSecondary;
   const statusBg = owedToYou > 0 ? C.greenDim : youOwe > 0 ? C.redDim : C.accentDim;
@@ -118,7 +148,13 @@ function SplitCard({ split, currentUserId, onMenuOpen, onDelete, onRequestPaymen
   );
 
   return (
-    <Swipeable renderRightActions={renderRightActions} overshootRight={false}>
+    <Swipeable
+      renderRightActions={renderRightActions}
+      overshootRight={false}
+      activeOffsetX={[-18, 18]}
+      failOffsetY={[-10, 10]}
+      dragOffsetFromRightEdge={24}
+    >
       <View style={styles.card}>
           {/* top accent line */}
           <View style={[styles.cardAccentLine, { backgroundColor: statusColor }]} />
@@ -138,31 +174,10 @@ function SplitCard({ split, currentUserId, onMenuOpen, onDelete, onRequestPaymen
             </Pressable>
           </View>
 
-          {/* Balance row */}
           <View style={styles.cardBalances}>
             <View style={[styles.statusBadge, { backgroundColor: statusBg, borderColor: statusColor + "44" }]}>
               <Text style={[styles.statusText, { color: statusColor }]}>{statusLabel}</Text>
             </View>
-
-        {canRequestPayment && (
-  <View style={{ paddingHorizontal: 14, paddingBottom: 10 }}>
-    <Pressable
-      style={{
-        backgroundColor: C.accentDim,
-        borderRadius: 10,
-        paddingVertical: 10,
-        alignItems: "center",
-        borderWidth: 1,
-        borderColor: C.accent + "55",
-      }}
-      onPress={() => onRequestPayment(split)}
-    >
-      <Text style={{ color: C.accentBright, fontWeight: "700" }}>
-        I Paid ${Math.abs(split.myBalance).toFixed(2)}
-      </Text>
-    </Pressable>
-  </View>
-)}
 
             <View style={styles.balanceGroup}>
               <View style={styles.balanceItem}>
@@ -178,6 +193,20 @@ function SplitCard({ split, currentUserId, onMenuOpen, onDelete, onRequestPaymen
               </View>
             </View>
           </View>
+
+          {canRequestPayment && (
+            <View style={styles.paymentActionWrap}>
+              <Pressable
+                style={[styles.paymentActionButton, split.paymentRequested && styles.paymentActionButtonSent]}
+                onPress={() => onRequestPayment(split)}
+                disabled={split.paymentRequested}
+              >
+                <Text style={[styles.paymentActionText, split.paymentRequested && styles.paymentActionTextSent]}>
+                  {split.paymentRequested ? "Request sent" : `I Paid $${Math.abs(split.myBalance).toFixed(2)}`}
+                </Text>
+              </Pressable>
+            </View>
+          )}
 
           {/* Friends */}
           {hasFriends && (
@@ -222,6 +251,7 @@ export default function HomeScreen() {
   const [availableFriends, setAvailableFriends] = useState<AvailableFriend[]>([]);
   const [loadingEditData, setLoadingEditData] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   // header anim
   const headerAnim = useFadeSlide(0, isFocused);
@@ -229,8 +259,14 @@ export default function HomeScreen() {
   const contentAnim = useFadeSlide(160, isFocused);
   const listAnim = useFadeSlide(240, isFocused);
 
-  const loadSplits = async () => {
-    setLoading(true);
+  useEffect(() => {
+    if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
+      UIManager.setLayoutAnimationEnabledExperimental(true);
+    }
+  }, []);
+
+  const loadSplits = async (showSpinner = true) => {
+    if (showSpinner) setLoading(true);
     const { data: { session }, error: authError } = await supabase.auth.getSession();
     const user = session?.user;
     if (!user) { setLoading(false); return; }
@@ -246,18 +282,80 @@ export default function HomeScreen() {
 
     if (error) { console.error("Error fetching splits:", error); setLoading(false); return; }
 
+    const splitIds = (data ?? []).map((split: any) => split.id);
+    const { data: pendingRequests, error: pendingRequestsError } = splitIds.length > 0
+      ? await supabase
+          .from("money_requests")
+          .select("split_id")
+          .eq("requester_id", user.id)
+          .eq("status", "pending")
+          .in("split_id", splitIds)
+      : { data: [], error: null };
+
+    if (pendingRequestsError) console.error("Error fetching payment requests:", pendingRequestsError);
+    const requestedSplitIds = new Set((pendingRequests ?? []).map((request: any) => request.split_id));
+
     const formatted: Split[] = (data ?? []).map((split: any) => {
       const myRow = Array.isArray(split.my_membership) ? split.my_membership[0] : split.my_membership;
       const friends: Friend[] = (split.all_members ?? [])
         .filter((m: any) => m.profile_id !== user.id)
         .map((m: any) => ({ id: m.profile_id, name: m.profiles?.full_name ?? "Unknown", balance: m.share_amount ?? 0 }));
-      return { id: split.id, title: split.title, total_amount: split.total_amount, created_at: split.created_at, creator_id: split.creator_id, myBalance: myRow?.share_amount ?? 0, friends };
+      const rawBalance = Number(myRow?.share_amount ?? 0);
+      const myBalance = split.creator_id === user.id
+        ? friends.reduce((sum, friend) => sum + Math.abs(Number(friend.balance ?? 0)), 0)
+        : rawBalance === 0
+          ? 0
+          : -Math.abs(rawBalance);
+
+      return {
+        id: split.id,
+        title: split.title,
+        total_amount: split.total_amount,
+        created_at: split.created_at,
+        creator_id: split.creator_id,
+        myBalance,
+        friends,
+        paymentRequested: requestedSplitIds.has(split.id),
+      };
     });
     setSplits(formatted);
     setLoading(false);
   };
 
+  const refreshSplits = async () => {
+    setRefreshing(true);
+    try {
+      await loadSplits(false);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   useEffect(() => { if (!isFocused) return; loadSplits(); }, [isFocused]);
+
+  useEffect(() => {
+    if (!isFocused) return;
+
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") loadSplits();
+    });
+
+    return () => subscription.remove();
+  }, [isFocused]);
+
+  useEffect(() => {
+    if (!isFocused || !currentUserId) return;
+
+    const channel = supabase
+      .channel(`home-splits-${currentUserId}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "split_members", filter: `profile_id=eq.${currentUserId}` }, () => loadSplits(false))
+      .on("postgres_changes", { event: "*", schema: "public", table: "money_requests", filter: `requester_id=eq.${currentUserId}` }, () => loadSplits(false))
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [currentUserId, isFocused]);
 
   // summary numbers
   const totalOwed = splits.reduce((s, sp) => s + (sp.myBalance > 0 ? sp.myBalance : 0), 0);
@@ -292,7 +390,7 @@ export default function HomeScreen() {
         .filter((m: any) => m.profile_id !== user.id)
         .map((m: any) => {
           const profile = m.profiles as any;
-          const amount = m.share_amount ?? 0;
+          const amount = Math.abs(Number(m.share_amount ?? 0));
           return { id: profile?.id ?? m.profile_id, full_name: profile?.full_name ?? "Unknown", username: profile?.username ?? "", shareAmount: amount, shareAmountInput: amount.toFixed(2) };
         });
 
@@ -334,7 +432,16 @@ export default function HomeScreen() {
       if (error) { Alert.alert("Error", "Could not save changes. Please try again."); return; }
       const memberRows = [
         { split_id: selectedSplit.id, profile_id: currentUserId, share_percentage: parsedTotal > 0 ? (creatorShare / parsedTotal) * 100 : 0, share_amount: creatorShare },
-        ...editMembers.map((m) => ({ split_id: selectedSplit.id, profile_id: m.id, share_percentage: parsedTotal > 0 ? ((parseFloat(m.shareAmountInput) || 0) / parsedTotal) * 100 : 0, share_amount: parseFloat(m.shareAmountInput) || 0 })),
+        ...editMembers.map((m) => {
+          const shareAmount = parseFloat(m.shareAmountInput) || 0;
+
+          return {
+            split_id: selectedSplit.id,
+            profile_id: m.id,
+            share_percentage: parsedTotal > 0 ? (shareAmount / parsedTotal) * 100 : 0,
+            share_amount: -shareAmount,
+          };
+        }),
       ];
       const { error: memberError } = await supabase.from("split_members").upsert(memberRows, { onConflict: "split_id,profile_id" });
       if (memberError) Alert.alert("Partial save", "Split details saved but members could not be updated.");
@@ -366,20 +473,81 @@ export default function HomeScreen() {
     const { data, error } = await supabase.from("splits").delete().eq("id", targetSplit.id).select("id");
     if (error) { Alert.alert("Error", "Could not delete split."); return; }
     if (!data || data.length === 0) return;
+    LayoutAnimation.configureNext(splitDeleteAnimation);
     setSplits((prev) => prev.filter((s) => s.id !== targetSplit.id));
     setActionMenuVisible(false); setSelectedSplit(null);
   };
 
   const handleRequestPayment = async (split: Split) => {
-  if (!currentUserId) return;
+  const requesterId = isUuid(currentUserId)
+    ? currentUserId
+    : (await supabase.auth.getUser()).data.user?.id ?? null;
+
+  if (!isUuid(requesterId)) {
+    Alert.alert("Error", "Could not load your account. Please sign in again.");
+    return;
+  }
+
+  if (!isUuid(split.id)) {
+    Alert.alert("Error", "Could not send request for this split.");
+    return;
+  }
+
+  let ownerId = split.creator_id;
+
+  if (!isUuid(ownerId)) {
+    const { data: splitOwner, error: ownerError } = await supabase
+      .from("splits")
+      .select("creator_id")
+      .eq("id", split.id)
+      .single();
+
+    if (ownerError) {
+      console.error("Error loading split owner:", ownerError);
+    }
+
+    ownerId = splitOwner?.creator_id;
+  }
+
+  if (!isUuid(ownerId)) {
+    Alert.alert("Error", "Could not find the split owner.");
+    return;
+  }
+
+  if (ownerId === requesterId) {
+    Alert.alert("No request needed", "You created this split.");
+    return;
+  }
 
   const amount = Math.abs(split.myBalance);
+
+  if (amount <= 0.005) {
+    Alert.alert("No request needed", "This split is already settled.");
+    return;
+  }
+
+  const { data: existingRequests, error: existingRequestError } = await supabase
+    .from("money_requests")
+    .select("id")
+    .eq("split_id", split.id)
+    .eq("requester_id", requesterId)
+    .eq("owner_id", ownerId)
+    .eq("status", "pending")
+    .limit(1);
+
+  if (existingRequestError) {
+    console.error("Error checking request:", existingRequestError);
+  } else if ((existingRequests ?? []).length > 0) {
+    setSplits((prev) => prev.map((item) => item.id === split.id ? { ...item, paymentRequested: true } : item));
+    Alert.alert("Already sent", "Your payment request is already waiting for the split owner.");
+    return;
+  }
 
   const { error } = await supabase.from("money_requests").insert([
     {
       split_id: split.id,
-      requester_id: currentUserId,
-      owner_id: split.creator_id,
+      requester_id: requesterId,
+      owner_id: ownerId,
       amount: amount,
       status: "pending",
     },
@@ -387,10 +555,11 @@ export default function HomeScreen() {
 
   if (error) {
     console.error("Error creating request:", error);
-    Alert.alert("Error", "Could not send payment request.");
+    Alert.alert("Error", error.message || "Could not send payment request.");
   } else {
+    setSplits((prev) => prev.map((item) => item.id === split.id ? { ...item, paymentRequested: true } : item));
     Alert.alert(
-      "Request sent",
+      "Request successfully sent",
       "Waiting for the split owner to confirm your payment."
     );
   }
@@ -425,6 +594,14 @@ export default function HomeScreen() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="never"
         keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={refreshSplits}
+            tintColor={C.accentBright}
+            colors={[C.accent]}
+          />
+        }
       >
 
         {/* ── HEADER ── */}
@@ -675,6 +852,11 @@ return StyleSheet.create({
   balanceLabel: { fontSize: 9, color: C.textMuted, textTransform: "uppercase", letterSpacing: 0.6 },
   balanceValue: { fontSize: 14, fontWeight: "700", color: C.textPrimary },
   balanceDivider: { width: 1, height: 24, backgroundColor: C.border },
+  paymentActionWrap: { paddingHorizontal: 14, paddingBottom: 12 },
+  paymentActionButton: { backgroundColor: C.accentDim, borderRadius: 10, paddingVertical: 10, alignItems: "center", borderWidth: 1, borderColor: C.accent + "55" },
+  paymentActionButtonSent: { backgroundColor: C.greenDim, borderColor: C.green + "44" },
+  paymentActionText: { color: C.accentBright, fontWeight: "700" },
+  paymentActionTextSent: { color: C.green },
 
   cardFriends: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14, paddingBottom: 12, flexWrap: "wrap" },
   friendsLabel: { fontSize: 10, color: C.textMuted },

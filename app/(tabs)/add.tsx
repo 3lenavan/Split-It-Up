@@ -25,6 +25,7 @@ import {
   Keyboard,
   Platform,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -32,10 +33,6 @@ import {
   TouchableWithoutFeedback,
   View,
 } from "react-native";
-import {
-  GestureHandlerRootView,
-  Swipeable,
-} from "react-native-gesture-handler";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 // ── Palette ──────────────────────────────────────────────────────────────────
@@ -155,34 +152,28 @@ function FriendChip({
   const initials = friend.full_name?.[0]?.toUpperCase() ?? "?";
   return (
     <Animated.View style={anim}>
-      <Swipeable
-        renderRightActions={() => (
-          <Pressable onPress={onRemove} style={styles.swipeDelete}>
-            <X size={15} color="#fff" />
-            <Text style={styles.swipeDeleteText}>Remove</Text>
-          </Pressable>
-        )}
-      >
-        <View style={styles.chipCard}>
-          <View style={styles.chipAvatar}>
-            <Text style={styles.chipAvatarText}>{initials}</Text>
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.chipName}>{friend.full_name}</Text>
-            <Text style={styles.chipHandle}>@{friend.username}</Text>
-          </View>
-          <View style={styles.chipAmount}>
-            <Text style={styles.chipPrefix}>$</Text>
-            <TextInput
-              style={styles.chipInput}
-              keyboardType="decimal-pad"
-              value={friend.shareAmountInput}
-              onChangeText={onAmountChange}
-              placeholderTextColor={C.textMuted}
-            />
-          </View>
+      <View style={styles.chipCard}>
+        <View style={styles.chipAvatar}>
+          <Text style={styles.chipAvatarText}>{initials}</Text>
         </View>
-      </Swipeable>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.chipName}>{friend.full_name}</Text>
+          <Text style={styles.chipHandle}>@{friend.username}</Text>
+        </View>
+        <View style={styles.chipAmount}>
+          <Text style={styles.chipPrefix}>$</Text>
+          <TextInput
+            style={styles.chipInput}
+            keyboardType="decimal-pad"
+            value={friend.shareAmountInput}
+            onChangeText={onAmountChange}
+            placeholderTextColor={C.textMuted}
+          />
+        </View>
+        <Pressable hitSlop={10} onPress={onRemove} style={styles.chipRemoveButton}>
+          <X size={14} color={C.red} />
+        </Pressable>
+      </View>
     </Animated.View>
   );
 }
@@ -204,6 +195,7 @@ export default function AddScreen({
   const [selectedFriends, setSelectedFriends] = useState<any[]>([]);
   const [showFriends, setShowFriends] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   // entrance animations
   const headerAnim = useFadeSlide(0, isFocused);
@@ -219,19 +211,29 @@ export default function AddScreen({
   const pressBtnOut = () =>
     Animated.spring(btnScale, { toValue: 1, useNativeDriver: true, tension: 300 }).start();
 
+  const loadUser = async () => {
+    const { data: { user }, error } = await supabase.auth.getUser();
+    if (error || !user) return;
+    setUser(user);
+    const { data } = await supabase
+      .from("friends")
+      .select("id, user_id, friend_id, profiles:friend_id ( id, full_name, username )")
+      .eq("user_id", user.id);
+    if (data) setFriends(data);
+  };
+
   useEffect(() => {
-    async function loadUser() {
-      const { data: { user }, error } = await supabase.auth.getUser();
-      if (error || !user) return;
-      setUser(user);
-      const { data } = await supabase
-        .from("friends")
-        .select("id, user_id, friend_id, profiles:friend_id ( id, full_name, username )")
-        .eq("user_id", user.id);
-      if (data) setFriends(data);
-    }
     loadUser();
   }, []);
+
+  const refreshFriends = async () => {
+    setRefreshing(true);
+    try {
+      await loadUser();
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   const totalAmount = parseFloat(total || "0");
   const allocated = selectedFriends.reduce(
@@ -254,21 +256,19 @@ export default function AddScreen({
     }
     setCreating(true);
     try {
-      const totalPeople = selectedFriends.length + 1;
-      const splitPct = 100 / totalPeople;
       await createSplit({
         title: trimmedTitle,
         totalAmount: amount,
         members: [
           {
             profileId: user.id,
-            sharePercentage: splitPct,
+            sharePercentage: (creatorShare / amount) * 100,
             shareAmount: creatorShare,
           },
           ...selectedFriends.map((f) => ({
             profileId: f.id,
             sharePercentage: ((parseFloat(f.shareAmountInput) || 0) / amount) * 100,
-            shareAmount: parseFloat(f.shareAmountInput) || 0,
+            shareAmount: -(parseFloat(f.shareAmountInput) || 0),
           })),
         ],
       });
@@ -280,14 +280,14 @@ export default function AddScreen({
       setSelectedFriends([]);
     } catch (err) {
       console.error(err);
+      Alert.alert("Error", err instanceof Error ? err.message : "Could not create split.");
     } finally {
       setCreating(false);
     }
   }
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+    <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
       <SafeAreaView edges={["top", "left", "right"]} style={styles.safe}>
         {/* background orbs */}
         <FloatingOrb style={styles.orb1} />
@@ -298,6 +298,14 @@ export default function AddScreen({
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="never"
           keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={refreshFriends}
+              tintColor={C.accentBright}
+              colors={[C.accent]}
+            />
+          }
         >
           {/* ── HEADER ── */}
           <Animated.View style={[styles.header, headerAnim]}>
@@ -517,8 +525,7 @@ export default function AddScreen({
           </Animated.View>
         </ScrollView>
       </SafeAreaView>
-      </TouchableWithoutFeedback>
-    </GestureHandlerRootView>
+    </TouchableWithoutFeedback>
   );
 }
 
@@ -664,13 +671,16 @@ return StyleSheet.create({
     minWidth: 64, textAlign: "right",
   },
 
-  // swipe delete
-  swipeDelete: {
-    backgroundColor: C.red, borderRadius: 14,
-    justifyContent: "center", alignItems: "center",
-    width: 76, marginBottom: 8, gap: 3,
+  chipRemoveButton: {
+    width: 30,
+    height: 30,
+    borderRadius: 10,
+    backgroundColor: C.redDim,
+    borderWidth: 1,
+    borderColor: C.red + "44",
+    alignItems: "center",
+    justifyContent: "center",
   },
-  swipeDeleteText: { color: "#fff", fontSize: 10, fontWeight: "700" },
 
   // progress
   progressSection: { marginTop: 8, marginBottom: 4 },

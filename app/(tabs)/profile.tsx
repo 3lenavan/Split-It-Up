@@ -4,7 +4,7 @@ import { useIsFocused } from "@react-navigation/native";
 import { router } from "expo-router";
 import { Check, ChevronDown, ChevronUp, Search, Settings2, Sparkles, UserPlus, X } from "lucide-react-native";
 import { useEffect, useRef, useState } from "react";
-import { Animated, Keyboard, LayoutAnimation, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableWithoutFeedback, UIManager, View } from "react-native";
+import { Animated, Keyboard, LayoutAnimation, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableWithoutFeedback, UIManager, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 function useFadeSlide(delay = 0, isActive = true) {
@@ -136,6 +136,7 @@ export default function ProfileScreen() {
   const [youreOwed, setYoureOwed] = useState(0);
   const [youOwe, setYouOwe] = useState(0);
   const [friendsExpanded, setFriendsExpanded] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
   const headerAnim = useFadeSlide(0, isFocused);
   const heroAnim = useFadeSlide(80, isFocused);
@@ -216,14 +217,24 @@ export default function ProfileScreen() {
     if (sessionError) return console.error("Error getting session for balances:", sessionError);
     const { data, error } = await supabase
       .from("splits")
-      .select(`id, my_membership:split_members!inner( profile_id, share_amount )`)
+      .select(`id, creator_id,
+        my_membership:split_members!inner( profile_id, share_amount ),
+        all_members:split_members( profile_id, share_amount )`)
       .eq("my_membership.profile_id", currentUserId);
     if (error) return console.error("Error loading balances:", error);
     let owedTotal = 0;
     let oweTotal = 0;
     (data ?? []).forEach((split: any) => {
       const myRow = Array.isArray(split.my_membership) ? split.my_membership[0] : split.my_membership;
-      const myBalance = Number(myRow?.share_amount ?? 0);
+      const rawBalance = Number(myRow?.share_amount ?? 0);
+      const myBalance = split.creator_id === currentUserId
+        ? (split.all_members ?? [])
+            .filter((member: any) => member.profile_id !== currentUserId)
+            .reduce((sum: number, member: any) => sum + Math.abs(Number(member.share_amount ?? 0)), 0)
+        : rawBalance === 0
+          ? 0
+          : -Math.abs(rawBalance);
+
       if (myBalance > 0) owedTotal += myBalance;
       else if (myBalance < 0) oweTotal += Math.abs(myBalance);
     });
@@ -240,6 +251,31 @@ export default function ProfileScreen() {
     loadSentRequests();
     loadFriends();
     loadBalances();
+  }, [isFocused]);
+
+  useEffect(() => {
+    if (!isFocused) return;
+
+    let active = true;
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+
+    supabase.auth.getSession().then(({ data }) => {
+      const currentUserId = data.session?.user?.id;
+      if (!active || !currentUserId) return;
+
+      channel = supabase
+        .channel(`profile-money-requests-${currentUserId}`)
+        .on("postgres_changes", { event: "*", schema: "public", table: "money_requests", filter: `owner_id=eq.${currentUserId}` }, () => {
+          loadMoneyRequests();
+          loadBalances();
+        })
+        .subscribe();
+    });
+
+    return () => {
+      active = false;
+      if (channel) supabase.removeChannel(channel);
+    };
   }, [isFocused]);
 
   const handleSearch = async () => {
@@ -431,6 +467,22 @@ const handleDeclineMoneyRequest = async (requestId: string) => {
     })) ?? []
   );
 };
+  const refreshProfile = async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([
+        loadProfile(),
+        loadPendingRequests(),
+        loadMoneyRequests(),
+        loadSentRequests(),
+        loadFriends(),
+        loadBalances(),
+      ]);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   const openSettings = () => {
     router.push("/settings" as any);
   };
@@ -448,6 +500,14 @@ const handleDeclineMoneyRequest = async (requestId: string) => {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="never"
         keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={refreshProfile}
+            tintColor={C.accentBright}
+            colors={[C.accent]}
+          />
+        }
       >
         <Animated.View style={[styles.header, headerAnim]}>
           <View style={styles.headerLeft}>
@@ -553,8 +613,8 @@ const handleDeclineMoneyRequest = async (requestId: string) => {
       <Animated.View style={[styles.glassCard, pendingAnim]}>
   <SectionHeader
     eyebrow="Inbox"
-    title="Money Requests"
-    badge={`${moneyRequests.length}`}
+    title="Friend Requests"
+    badge={`${pendingRequests.length}`}
     styles={styles}
   />
           {pendingRequests.length === 0 ? (
