@@ -40,6 +40,8 @@ type Split = {
   total_amount: number;
   created_at: string;
   creator_id: string;
+  creatorUsername: string;
+  creatorName: string;
   myBalance: number;
   friends: Friend[];
   paymentRequested?: boolean;
@@ -129,6 +131,8 @@ function SplitCard({ split, currentUserId, onMenuOpen, onDelete, onRequestPaymen
   const MAX_BADGES = 3;
   const isOwner = currentUserId === split.creator_id;
   const canRequestPayment = !isOwner && split.myBalance < -0.005;
+  const ownerHandle = split.creatorUsername ? `@${split.creatorUsername}` : split.creatorName || "Unknown";
+  const ownerLabel = isOwner ? `${ownerHandle} (you)` : ownerHandle;
 
   const statusColor = owedToYou > 0 ? C.green : youOwe > 0 ? C.red : C.textSecondary;
   const statusBg = owedToYou > 0 ? C.greenDim : youOwe > 0 ? C.redDim : C.accentDim;
@@ -168,6 +172,7 @@ function SplitCard({ split, currentUserId, onMenuOpen, onDelete, onRequestPaymen
               <Text style={styles.cardDate}>
                 {new Date(split.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
               </Text>
+              <Text style={styles.cardOwner} numberOfLines={1}>Owner: {ownerLabel}</Text>
             </View>
             <Pressable ref={menuButtonRef} hitSlop={10} style={styles.menuTrigger} onPress={handleMenuPress}>
               <Text style={styles.menuDots}>⋯</Text>
@@ -283,6 +288,19 @@ export default function HomeScreen() {
     if (error) { console.error("Error fetching splits:", error); setLoading(false); return; }
 
     const splitIds = (data ?? []).map((split: any) => split.id);
+    const creatorIds = Array.from(new Set((data ?? []).map((split: any) => split.creator_id).filter(isUuid)));
+    const { data: creatorProfiles, error: creatorProfilesError } = creatorIds.length > 0
+      ? await supabase
+          .from("profiles")
+          .select("id, full_name, username")
+          .in("id", creatorIds)
+      : { data: [], error: null };
+
+    if (creatorProfilesError) console.error("Error fetching split owners:", creatorProfilesError);
+    const creatorProfilesById = new Map(
+      (creatorProfiles ?? []).map((profile: any) => [profile.id, profile])
+    );
+
     const { data: pendingRequests, error: pendingRequestsError } = splitIds.length > 0
       ? await supabase
           .from("money_requests")
@@ -297,6 +315,7 @@ export default function HomeScreen() {
 
     const formatted: Split[] = (data ?? []).map((split: any) => {
       const myRow = Array.isArray(split.my_membership) ? split.my_membership[0] : split.my_membership;
+      const creatorProfile = creatorProfilesById.get(split.creator_id);
       const friends: Friend[] = (split.all_members ?? [])
         .filter((m: any) => m.profile_id !== user.id)
         .map((m: any) => ({ id: m.profile_id, name: m.profiles?.full_name ?? "Unknown", balance: m.share_amount ?? 0 }));
@@ -313,6 +332,8 @@ export default function HomeScreen() {
         total_amount: split.total_amount,
         created_at: split.created_at,
         creator_id: split.creator_id,
+        creatorUsername: creatorProfile?.username ?? "",
+        creatorName: creatorProfile?.full_name ?? "",
         myBalance,
         friends,
         paymentRequested: requestedSplitIds.has(split.id),
@@ -841,6 +862,7 @@ return StyleSheet.create({
   cardIconWrap: { width: 36, height: 36, borderRadius: 10, backgroundColor: C.accentDim, justifyContent: "center", alignItems: "center" },
   cardTitle: { fontSize: 15, fontWeight: "700", color: C.textPrimary },
   cardDate: { fontSize: 11, color: C.textMuted, marginTop: 1 },
+  cardOwner: { fontSize: 11, color: C.accentBright, marginTop: 2, fontWeight: "700" },
   menuTrigger: { width: 32, height: 32, borderRadius: 10, backgroundColor: C.surface, justifyContent: "center", alignItems: "center" },
   menuDots: { fontSize: 18, color: C.textSecondary, lineHeight: 20 },
 
