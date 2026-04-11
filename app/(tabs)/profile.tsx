@@ -159,6 +159,7 @@ export default function ProfileScreen() {
   const farewellSlide = useRef(new Animated.Value(20)).current;
   const farewellGlow = useRef(new Animated.Value(1)).current;
   const farewellProgress = useRef(new Animated.Value(0)).current;
+  const [moneyRequests, setMoneyRequests] = useState<any[]>([]);
 
   useEffect(() => {
     if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -253,6 +254,7 @@ export default function ProfileScreen() {
   useEffect(() => {
     loadProfile();
     loadPendingRequests();
+    loadMoneyRequests();
     loadSentRequests();
     loadFriends();
     loadBalances();
@@ -322,6 +324,62 @@ export default function ProfileScreen() {
     await loadPendingRequests();
     await loadFriends();
   };
+
+  const handleAcceptMoneyRequest = async (requestId: string) => {
+  const { data: request, error: fetchError } = await supabase
+    .from("money_requests")
+    .select("*")
+    .eq("id", requestId)
+    .single();
+
+  if (fetchError) return console.error("Error fetching money request:", fetchError);
+
+  const { split_id, requester_id, amount } = request;
+
+  const { data: memberRow, error: memberError } = await supabase
+    .from("split_members")
+    .select("id, share_amount")
+    .eq("split_id", split_id)
+    .eq("profile_id", requester_id)
+    .single();
+
+  if (memberError) return console.error("Error finding split member:", memberError);
+
+  let newAmount = Number(memberRow.share_amount ?? 0) + Number(amount);
+
+  if (newAmount > 0) newAmount = 0;
+
+  const { error: updateMemberError } = await supabase
+    .from("split_members")
+    .update({ share_amount: newAmount })
+    .eq("id", memberRow.id);
+
+  if (updateMemberError) return console.error("Error updating balance:", updateMemberError);
+
+  const { error: updateRequestError } = await supabase
+    .from("money_requests")
+    .update({ status: "accepted" })
+    .eq("id", requestId);
+
+  if (updateRequestError) return console.error("Error updating request:", updateRequestError);
+
+  console.log("Money request accepted");
+
+  await loadMoneyRequests();
+  await loadBalances();
+};
+
+const handleDeclineMoneyRequest = async (requestId: string) => {
+  const { error } = await supabase
+    .from("money_requests")
+    .update({ status: "declined" })
+    .eq("id", requestId);
+
+  if (error) return console.error("Error declining request:", error);
+
+  console.log("Money request declined");
+  await loadMoneyRequests();
+};
 
   const handleDeclineRequest = async (requestId: string) => {
     const { error } = await supabase.from("friend_requests").update({ status: "declined" }).eq("id", requestId);
@@ -394,6 +452,44 @@ export default function ProfileScreen() {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setFriendsExpanded((prev) => !prev);
   };
+
+  const loadMoneyRequests = async () => {
+  const { data: { session } } = await supabase.auth.getSession();
+  const currentUserId = session?.user?.id;
+  if (!currentUserId) return;
+
+  const { data, error } = await supabase
+    .from("money_requests")
+    .select(`
+      id,
+      split_id,
+      requester_id,
+      amount,
+      status,
+      requester:profiles!requester_id (
+        full_name,
+        username
+      )
+    `)
+    .eq("owner_id", currentUserId)
+    .eq("status", "pending");
+
+  if (error) {
+    console.error("Error loading money requests:", error);
+    return;
+  }
+
+  setMoneyRequests(
+    data?.map((request: any) => ({
+      id: request.id,
+      splitId: request.split_id,
+      requesterId: request.requester_id,
+      amount: Number(request.amount),
+      name: request.requester?.full_name || "Unknown User",
+      username: request.requester?.username || "unknown",
+    })) ?? []
+  );
+};
 
   const profileInitial = profile.name ? profile.name.charAt(0).toUpperCase() : "?";
 
@@ -518,6 +614,47 @@ export default function ProfileScreen() {
             </View>
           ))}
         </Animated.View>
+
+      <Animated.View style={[styles.glassCard, pendingAnim]}>
+  <SectionHeader eyebrow="Inbox" title="Money Requests" badge={`${moneyRequests.length}`} />
+  {moneyRequests.length === 0 ? (
+    <View style={styles.emptyState}>
+      <Text style={styles.emptyTitle}>No pending money requests</Text>
+      <Text style={styles.emptySubtitle}>Money payoff requests will show up here.</Text>
+    </View>
+  ) : moneyRequests.map((request) => (
+    <View key={request.id} style={styles.pendingCard}>
+      <View style={styles.pendingInfo}>
+        <View style={styles.pendingAvatar}>
+          <Text style={styles.pendingAvatarText}>
+            {request.name ? request.name.charAt(0).toUpperCase() : "?"}
+          </Text>
+        </View>
+        <View>
+          <Text style={styles.resultName}>{request.name}</Text>
+          <Text style={styles.resultUsername}>@{request.username}</Text>
+          <Text style={styles.resultMutual}>Wants to pay: ${request.amount.toFixed(2)}</Text>
+        </View>
+      </View>
+
+      <View style={styles.requestActions}>
+    <Pressable
+    style={styles.acceptButton}
+    onPress={() => handleAcceptMoneyRequest(request.id)}
+  >
+    <Text style={styles.requestButtonText}>Accept</Text>
+  </Pressable>
+
+  <Pressable
+    style={styles.declineButton}
+    onPress={() => handleDeclineMoneyRequest(request.id)}
+  >
+    <Text style={styles.requestButtonText}>Decline</Text>
+  </Pressable>
+</View>
+    </View>
+  ))}
+</Animated.View>
 
         <Animated.View
           style={[styles.glassCard, friendsAnim]}

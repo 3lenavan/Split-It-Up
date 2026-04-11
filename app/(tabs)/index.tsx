@@ -98,17 +98,20 @@ function FloatingOrb({ style }: { style?: any }) {
 // ── Split Card ────────────────────────────────────────────────────────────────
 type SplitCardProps = {
   split: Split;
+  currentUserId: string | null;
   onMenuOpen: (split: Split, position: { x: number; y: number }) => void;
   onDelete: (split: Split) => void;
+  onRequestPayment: (split: Split) => void;
 };
-
-function SplitCard({ split, onMenuOpen, onDelete }: SplitCardProps) {
+function SplitCard({ split, currentUserId, onMenuOpen, onDelete, onRequestPayment }: SplitCardProps) {
   const menuButtonRef = useRef<View>(null);
 
   const owedToYou = split.myBalance > 0 ? split.myBalance : 0;
   const youOwe = split.myBalance < 0 ? Math.abs(split.myBalance) : 0;
   const hasFriends = split.friends.length > 0;
   const MAX_BADGES = 3;
+  const isOwner = currentUserId === split.creator_id;
+  const canRequestPayment = !isOwner && split.myBalance < 0;
 
   const statusColor = owedToYou > 0 ? C.green : youOwe > 0 ? C.red : C.textSecondary;
   const statusBg = owedToYou > 0 ? C.greenDim : youOwe > 0 ? C.redDim : C.accentDim;
@@ -153,6 +156,26 @@ function SplitCard({ split, onMenuOpen, onDelete }: SplitCardProps) {
             <View style={[styles.statusBadge, { backgroundColor: statusBg, borderColor: statusColor + "44" }]}>
               <Text style={[styles.statusText, { color: statusColor }]}>{statusLabel}</Text>
             </View>
+
+        {canRequestPayment && (
+  <View style={{ paddingHorizontal: 14, paddingBottom: 10 }}>
+    <Pressable
+      style={{
+        backgroundColor: C.accentDim,
+        borderRadius: 10,
+        paddingVertical: 10,
+        alignItems: "center",
+        borderWidth: 1,
+        borderColor: C.accent + "55",
+      }}
+      onPress={() => onRequestPayment(split)}
+    >
+      <Text style={{ color: C.accentBright, fontWeight: "700" }}>
+        I Paid ${Math.abs(split.myBalance).toFixed(2)}
+      </Text>
+    </Pressable>
+  </View>
+)}
 
             <View style={styles.balanceGroup}>
               <View style={styles.balanceItem}>
@@ -346,6 +369,32 @@ export default function HomeScreen() {
     setActionMenuVisible(false); setSelectedSplit(null);
   };
 
+  const handleRequestPayment = async (split: Split) => {
+  if (!currentUserId) return;
+
+  const amount = Math.abs(split.myBalance);
+
+  const { error } = await supabase.from("money_requests").insert([
+    {
+      split_id: split.id,
+      requester_id: currentUserId,
+      owner_id: split.creator_id,
+      amount: amount,
+      status: "pending",
+    },
+  ]);
+
+  if (error) {
+    console.error("Error creating request:", error);
+    Alert.alert("Error", "Could not send payment request.");
+  } else {
+    Alert.alert(
+      "Request sent",
+      "Waiting for the split owner to confirm your payment."
+    );
+  }
+};
+
   const confirmDeleteSplit = (splitToDelete?: Split) => {
     const targetSplit = splitToDelete ?? selectedSplit;
     if (!targetSplit) return;
@@ -425,12 +474,14 @@ export default function HomeScreen() {
 
         <Animated.View style={listAnim}>
           {splits.map((split) => (
-            <SplitCard
-              key={split.id}
-              split={split}
-              onMenuOpen={openActionMenu}
-              onDelete={confirmDeleteSplit}
-            />
+        <SplitCard
+        key={split.id}
+        split={split}
+        currentUserId={currentUserId}
+        onMenuOpen={openActionMenu}
+        onDelete={confirmDeleteSplit}
+        onRequestPayment={handleRequestPayment}
+        />
           ))}
         </Animated.View>
       </ScrollView>
