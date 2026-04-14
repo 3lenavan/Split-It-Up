@@ -5,8 +5,10 @@
  * built-in Animated API (no extra deps needed).
  *****************************************************************************/
 import { createSplit } from "@/lib/split";
+import { THEME_PALETTES, useAppTheme } from "@/lib/app-theme";
 import { supabase } from "@/lib/supabaseClient";
 import * as Haptics from "expo-haptics";
+import { useIsFocused } from "@react-navigation/native";
 import {
   CheckCircle,
   ChevronDown,
@@ -20,48 +22,41 @@ import { useEffect, useRef, useState } from "react";
 import {
   Alert,
   Animated,
+  Keyboard,
+  Platform,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
+  TouchableWithoutFeedback,
   View,
 } from "react-native";
-import {
-  GestureHandlerRootView,
-  Swipeable,
-} from "react-native-gesture-handler";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 // ── Palette ──────────────────────────────────────────────────────────────────
-const C = {
-  bg: "#07070f",
-  surface: "#0f0f1a",
-  card: "#141420",
-  cardBright: "#1c1c2e",
-  border: "#252538",
-  borderBright: "#353550",
-  accent: "#a855f7",
-  accentDim: "#a855f730",
+let C = {
+  ...THEME_PALETTES.dark,
   accentGlow: "#a855f750",
-  accentBright: "#d8b4fe",
-  accentDeep: "#7c3aed",
-  green: "#22d3a5",
-  greenDim: "#22d3a518",
-  red: "#f43f5e",
-  redDim: "#f43f5e18",
-  amber: "#fbbf24",
-  amberDim: "#fbbf2418",
-  textPrimary: "#f0eeff",
-  textSecondary: "#7c7c9e",
-  textMuted: "#3a3a52",
 };
+let styles = createStyles(C);
 
 // ── Animated entrance hook ───────────────────────────────────────────────────
-function useFadeSlide(delay = 0) {
+function useFadeSlide(delay = 0, isActive = true) {
   const opacity = useRef(new Animated.Value(0)).current;
   const translateY = useRef(new Animated.Value(22)).current;
+
   useEffect(() => {
+    if (!isActive) {
+      opacity.setValue(0);
+      translateY.setValue(22);
+      return;
+    }
+
+    opacity.setValue(0);
+    translateY.setValue(22);
+
     Animated.parallel([
       Animated.timing(opacity, {
         toValue: 1, duration: 480, delay,
@@ -72,7 +67,7 @@ function useFadeSlide(delay = 0) {
         useNativeDriver: true,
       }),
     ]).start();
-  }, []);
+  }, [delay, isActive, opacity, translateY]);
   return { opacity, transform: [{ translateY }] };
 }
 
@@ -157,34 +152,28 @@ function FriendChip({
   const initials = friend.full_name?.[0]?.toUpperCase() ?? "?";
   return (
     <Animated.View style={anim}>
-      <Swipeable
-        renderRightActions={() => (
-          <Pressable onPress={onRemove} style={styles.swipeDelete}>
-            <X size={15} color="#fff" />
-            <Text style={styles.swipeDeleteText}>Remove</Text>
-          </Pressable>
-        )}
-      >
-        <View style={styles.chipCard}>
-          <View style={styles.chipAvatar}>
-            <Text style={styles.chipAvatarText}>{initials}</Text>
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.chipName}>{friend.full_name}</Text>
-            <Text style={styles.chipHandle}>@{friend.username}</Text>
-          </View>
-          <View style={styles.chipAmount}>
-            <Text style={styles.chipPrefix}>$</Text>
-            <TextInput
-              style={styles.chipInput}
-              keyboardType="decimal-pad"
-              value={friend.shareAmountInput}
-              onChangeText={onAmountChange}
-              placeholderTextColor={C.textMuted}
-            />
-          </View>
+      <View style={styles.chipCard}>
+        <View style={styles.chipAvatar}>
+          <Text style={styles.chipAvatarText}>{initials}</Text>
         </View>
-      </Swipeable>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.chipName}>{friend.full_name}</Text>
+          <Text style={styles.chipHandle}>@{friend.username}</Text>
+        </View>
+        <View style={styles.chipAmount}>
+          <Text style={styles.chipPrefix}>$</Text>
+          <TextInput
+            style={styles.chipInput}
+            keyboardType="decimal-pad"
+            value={friend.shareAmountInput}
+            onChangeText={onAmountChange}
+            placeholderTextColor={C.textMuted}
+          />
+        </View>
+        <Pressable hitSlop={10} onPress={onRemove} style={styles.chipRemoveButton}>
+          <X size={14} color={C.red} />
+        </Pressable>
+      </View>
     </Animated.View>
   );
 }
@@ -195,6 +184,10 @@ export default function AddScreen({
 }: {
   onSplitCreated?: () => void;
 }) {
+  const { palette } = useAppTheme();
+  C = { ...palette, accentGlow: `${palette.accent}50` };
+  styles = createStyles(C);
+  const isFocused = useIsFocused();
   const [occasionName, setOccasionName] = useState("");
   const [total, setTotal] = useState("");
   const [user, setUser] = useState<any>(null);
@@ -202,13 +195,14 @@ export default function AddScreen({
   const [selectedFriends, setSelectedFriends] = useState<any[]>([]);
   const [showFriends, setShowFriends] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   // entrance animations
-  const headerAnim = useFadeSlide(0);
-  const card1Anim = useFadeSlide(80);
-  const card2Anim = useFadeSlide(160);
-  const card3Anim = useFadeSlide(240);
-  const btnAnim = useFadeSlide(320);
+  const headerAnim = useFadeSlide(0, isFocused);
+  const card1Anim = useFadeSlide(80, isFocused);
+  const card2Anim = useFadeSlide(160, isFocused);
+  const card3Anim = useFadeSlide(240, isFocused);
+  const btnAnim = useFadeSlide(320, isFocused);
 
   // button press scale
   const btnScale = useRef(new Animated.Value(1)).current;
@@ -217,19 +211,29 @@ export default function AddScreen({
   const pressBtnOut = () =>
     Animated.spring(btnScale, { toValue: 1, useNativeDriver: true, tension: 300 }).start();
 
+  const loadUser = async () => {
+    const { data: { user }, error } = await supabase.auth.getUser();
+    if (error || !user) return;
+    setUser(user);
+    const { data } = await supabase
+      .from("friends")
+      .select("id, user_id, friend_id, profiles:friend_id ( id, full_name, username )")
+      .eq("user_id", user.id);
+    if (data) setFriends(data);
+  };
+
   useEffect(() => {
-    async function loadUser() {
-      const { data: { user }, error } = await supabase.auth.getUser();
-      if (error || !user) return;
-      setUser(user);
-      const { data } = await supabase
-        .from("friends")
-        .select("id, user_id, friend_id, profiles:friend_id ( id, full_name, username )")
-        .eq("user_id", user.id);
-      if (data) setFriends(data);
-    }
     loadUser();
   }, []);
+
+  const refreshFriends = async () => {
+    setRefreshing(true);
+    try {
+      await loadUser();
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   const totalAmount = parseFloat(total || "0");
   const allocated = selectedFriends.reduce(
@@ -252,21 +256,19 @@ export default function AddScreen({
     }
     setCreating(true);
     try {
-      const totalPeople = selectedFriends.length + 1;
-      const splitPct = 100 / totalPeople;
       await createSplit({
         title: trimmedTitle,
         totalAmount: amount,
         members: [
           {
             profileId: user.id,
-            sharePercentage: splitPct,
+            sharePercentage: (creatorShare / amount) * 100,
             shareAmount: creatorShare,
           },
           ...selectedFriends.map((f) => ({
             profileId: f.id,
             sharePercentage: ((parseFloat(f.shareAmountInput) || 0) / amount) * 100,
-            shareAmount: parseFloat(f.shareAmountInput) || 0,
+            shareAmount: -(parseFloat(f.shareAmountInput) || 0),
           })),
         ],
       });
@@ -278,14 +280,15 @@ export default function AddScreen({
       setSelectedFriends([]);
     } catch (err) {
       console.error(err);
+      Alert.alert("Error", err instanceof Error ? err.message : "Could not create split.");
     } finally {
       setCreating(false);
     }
   }
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <SafeAreaView style={styles.safe}>
+    <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+      <SafeAreaView edges={["top", "left", "right"]} style={styles.safe}>
         {/* background orbs */}
         <FloatingOrb style={styles.orb1} />
         <FloatingOrb style={styles.orb2} />
@@ -293,7 +296,16 @@ export default function AddScreen({
         <ScrollView
           contentContainerStyle={styles.scroll}
           showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
+          keyboardShouldPersistTaps="never"
+          keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={refreshFriends}
+              tintColor={C.accentBright}
+              colors={[C.accent]}
+            />
+          }
         >
           {/* ── HEADER ── */}
           <Animated.View style={[styles.header, headerAnim]}>
@@ -513,13 +525,14 @@ export default function AddScreen({
           </Animated.View>
         </ScrollView>
       </SafeAreaView>
-    </GestureHandlerRootView>
+    </TouchableWithoutFeedback>
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(C: typeof THEME_PALETTES.dark & { accentGlow: string }) {
+return StyleSheet.create({
   safe: { flex: 1, backgroundColor: C.bg },
-  scroll: { paddingHorizontal: 16, paddingTop: 20, paddingBottom: 56 },
+  scroll: { paddingHorizontal: 16, paddingTop: 20, paddingBottom: 140 },
 
   // background orbs
   orb1: {
@@ -658,13 +671,16 @@ const styles = StyleSheet.create({
     minWidth: 64, textAlign: "right",
   },
 
-  // swipe delete
-  swipeDelete: {
-    backgroundColor: C.red, borderRadius: 14,
-    justifyContent: "center", alignItems: "center",
-    width: 76, marginBottom: 8, gap: 3,
+  chipRemoveButton: {
+    width: 30,
+    height: 30,
+    borderRadius: 10,
+    backgroundColor: C.redDim,
+    borderWidth: 1,
+    borderColor: C.red + "44",
+    alignItems: "center",
+    justifyContent: "center",
   },
-  swipeDeleteText: { color: "#fff", fontSize: 10, fontWeight: "700" },
 
   // progress
   progressSection: { marginTop: 8, marginBottom: 4 },
@@ -749,3 +765,4 @@ const styles = StyleSheet.create({
     color: "#fff", fontSize: 17, fontWeight: "800", letterSpacing: 0.2,
   },
 });
+}
