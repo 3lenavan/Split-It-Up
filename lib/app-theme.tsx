@@ -1,11 +1,14 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { DarkTheme, DefaultTheme, Theme } from "@react-navigation/native";
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
-export type ThemeMode = "dark" | "light";
+export type ThemeMode = "dark" | "light" | "aurora" | "candy" | "mint" | "ruby";
+export type ThemeAppearance = "dark" | "light";
+export type BackgroundMode = "default" | "mountains" | "city" | "ocean" | "stars";
 
 export type AppPalette = {
-  mode: ThemeMode;
+  id: ThemeMode;
+  mode: ThemeAppearance;
   bg: string;
   surface: string;
   card: string;
@@ -38,9 +41,67 @@ export type AppPalette = {
 };
 
 const STORAGE_KEY = "splititup-theme-mode";
+const BACKGROUND_STORAGE_KEY = "splititup-background-mode";
+
+export type ThemeOption = {
+  id: ThemeMode;
+  name: string;
+  description: string;
+  colors: string[];
+};
+
+export type AppBackgroundOption = {
+  id: BackgroundMode;
+  name: string;
+  description: string;
+  colors: string[];
+};
+
+export const THEME_OPTIONS: ThemeOption[] = [
+  { id: "dark", name: "Dark", description: "Soft dark with bright violet.", colors: ["#07070f", "#a855f7", "#22d3a5"] },
+  { id: "light", name: "Light", description: "Clean and bright.", colors: ["#f5f7ff", "#7c3aed", "#0284c7"] },
+  { id: "aurora", name: "Aurora", description: "Green glow with pink sparks.", colors: ["#06110f", "#34d399", "#fb7185"] },
+  { id: "candy", name: "Candy", description: "Cute pink with sky blue.", colors: ["#fff7fb", "#ec4899", "#06b6d4"] },
+  { id: "mint", name: "Mint", description: "Fresh green with coral.", colors: ["#f2fff9", "#10b981", "#f43f5e"] },
+  { id: "ruby", name: "Ruby", description: "Deep red with aqua shine.", colors: ["#12090d", "#e11d48", "#22d3ee"] },
+];
+
+export const APP_BACKGROUND_OPTIONS: AppBackgroundOption[] = [
+  {
+    id: "default",
+    name: "Default",
+    description: "Use the theme background.",
+    colors: ["#07070f", "#f5f7ff", "#a855f7"],
+  },
+  {
+    id: "mountains",
+    name: "Mountains",
+    description: "Soft peaks behind the app.",
+    colors: ["#0f172a", "#38bdf8", "#a7f3d0"],
+  },
+  {
+    id: "city",
+    name: "City",
+    description: "A little skyline glow.",
+    colors: ["#111827", "#f472b6", "#22d3ee"],
+  },
+  {
+    id: "ocean",
+    name: "Ocean",
+    description: "Calm waves and light.",
+    colors: ["#052e2b", "#14b8a6", "#67e8f9"],
+  },
+  {
+    id: "stars",
+    name: "Dream Stars",
+    description: "Cute stars and floating clouds.",
+    colors: ["#1e1b4b", "#fde68a", "#c4b5fd"],
+  },
+];
 
 export const THEME_PALETTES: Record<ThemeMode, AppPalette> = {
   dark: {
+    id: "dark",
     mode: "dark",
     bg: "#07070f",
     surface: "#0f0f1a",
@@ -73,6 +134,7 @@ export const THEME_PALETTES: Record<ThemeMode, AppPalette> = {
     tabAccentSoft: "#d8b4fe",
   },
   light: {
+    id: "light",
     mode: "light",
     bg: "#f5f7ff",
     surface: "#ffffff",
@@ -104,20 +166,154 @@ export const THEME_PALETTES: Record<ThemeMode, AppPalette> = {
     tabTextMuted: "#7d7997",
     tabAccentSoft: "#7c3aed",
   },
+  aurora: {
+    id: "aurora",
+    mode: "dark",
+    bg: "#06110f",
+    surface: "#0d1c18",
+    card: "#10231f",
+    cardBright: "#16352e",
+    border: "#21463d",
+    borderBright: "#2d5f51",
+    accent: "#34d399",
+    accentDim: "#34d39924",
+    accentBright: "#a7f3d0",
+    accentDeep: "#0f766e",
+    green: "#4ade80",
+    greenDim: "#4ade8018",
+    red: "#fb7185",
+    redDim: "#fb718518",
+    amber: "#facc15",
+    amberDim: "#facc1518",
+    blue: "#22d3ee",
+    blueDim: "#22d3ee18",
+    textPrimary: "#eefcf7",
+    textSecondary: "#9bc9bd",
+    textMuted: "#6fa195",
+    orbPrimary: "#34d39945",
+    orbSecondary: "#fb718545",
+    tabSurface: "#10231f",
+    tabSurfaceSoft: "#17352e",
+    tabBorder: "#2d5f51",
+    tabText: "#eefcf7",
+    tabTextMuted: "#9bc9bd",
+    tabAccentSoft: "#a7f3d0",
+  },
+  candy: {
+    id: "candy",
+    mode: "light",
+    bg: "#fff7fb",
+    surface: "#ffffff",
+    card: "#ffffff",
+    cardBright: "#ffe8f1",
+    border: "#f5c6d9",
+    borderBright: "#f2a9c8",
+    accent: "#ec4899",
+    accentDim: "#ec489918",
+    accentBright: "#db2777",
+    accentDeep: "#be185d",
+    green: "#10b981",
+    greenDim: "#10b98112",
+    red: "#e11d48",
+    redDim: "#e11d4812",
+    amber: "#ca8a04",
+    amberDim: "#ca8a0412",
+    blue: "#06b6d4",
+    blueDim: "#06b6d412",
+    textPrimary: "#24131c",
+    textSecondary: "#7b5265",
+    textMuted: "#ad8095",
+    orbPrimary: "#ec489935",
+    orbSecondary: "#06b6d430",
+    tabSurface: "#ffffff",
+    tabSurfaceSoft: "#ffe8f1",
+    tabBorder: "#f5c6d9",
+    tabText: "#24131c",
+    tabTextMuted: "#8f6678",
+    tabAccentSoft: "#db2777",
+  },
+  mint: {
+    id: "mint",
+    mode: "light",
+    bg: "#f2fff9",
+    surface: "#ffffff",
+    card: "#ffffff",
+    cardBright: "#dcfce7",
+    border: "#b7efd0",
+    borderBright: "#8ee7b8",
+    accent: "#10b981",
+    accentDim: "#10b98116",
+    accentBright: "#047857",
+    accentDeep: "#047857",
+    green: "#16a34a",
+    greenDim: "#16a34a12",
+    red: "#f43f5e",
+    redDim: "#f43f5e12",
+    amber: "#d97706",
+    amberDim: "#d9770612",
+    blue: "#0891b2",
+    blueDim: "#0891b212",
+    textPrimary: "#10231b",
+    textSecondary: "#4e7565",
+    textMuted: "#83a99a",
+    orbPrimary: "#10b98130",
+    orbSecondary: "#f43f5e22",
+    tabSurface: "#ffffff",
+    tabSurfaceSoft: "#dcfce7",
+    tabBorder: "#b7efd0",
+    tabText: "#10231b",
+    tabTextMuted: "#5f8777",
+    tabAccentSoft: "#047857",
+  },
+  ruby: {
+    id: "ruby",
+    mode: "dark",
+    bg: "#12090d",
+    surface: "#1e1117",
+    card: "#281720",
+    cardBright: "#351d2a",
+    border: "#4a2638",
+    borderBright: "#673149",
+    accent: "#e11d48",
+    accentDim: "#e11d4826",
+    accentBright: "#fda4af",
+    accentDeep: "#be123c",
+    green: "#22c55e",
+    greenDim: "#22c55e18",
+    red: "#fb7185",
+    redDim: "#fb718518",
+    amber: "#facc15",
+    amberDim: "#facc1518",
+    blue: "#22d3ee",
+    blueDim: "#22d3ee18",
+    textPrimary: "#fff1f5",
+    textSecondary: "#c49aa9",
+    textMuted: "#946a7a",
+    orbPrimary: "#e11d4840",
+    orbSecondary: "#22d3ee30",
+    tabSurface: "#281720",
+    tabSurfaceSoft: "#351d2a",
+    tabBorder: "#4a2638",
+    tabText: "#fff1f5",
+    tabTextMuted: "#c49aa9",
+    tabAccentSoft: "#fda4af",
+  },
 };
 
 type AppThemeContextValue = {
   mode: ThemeMode;
+  backgroundMode: BackgroundMode;
   palette: AppPalette;
   setMode: (mode: ThemeMode) => void;
+  setBackgroundMode: (mode: BackgroundMode) => void;
   isDark: boolean;
   navigationTheme: Theme;
 };
 
 const AppThemeContext = createContext<AppThemeContextValue | null>(null);
 
-function buildNavigationTheme(mode: ThemeMode, palette: AppPalette): Theme {
-  const base = mode === "dark" ? DarkTheme : DefaultTheme;
+function buildNavigationTheme(palette: AppPalette): Theme {
+  const base = palette.mode === "dark" ? DarkTheme : DefaultTheme;
 
   return {
     ...base,
@@ -135,32 +331,48 @@ function buildNavigationTheme(mode: ThemeMode, palette: AppPalette): Theme {
 
 export function AppThemeProvider({ children }: { children: React.ReactNode }) {
   const [mode, setModeState] = useState<ThemeMode>("dark");
+  const [backgroundMode, setBackgroundModeState] = useState<BackgroundMode>("default");
 
   useEffect(() => {
-    AsyncStorage.getItem(STORAGE_KEY)
-      .then((stored) => {
-        if (stored === "dark" || stored === "light") {
-          setModeState(stored);
+    AsyncStorage.multiGet([STORAGE_KEY, BACKGROUND_STORAGE_KEY])
+      .then((storedValues) => {
+        const storedTheme = storedValues.find(([key]) => key === STORAGE_KEY)?.[1];
+        const storedBackground = storedValues.find(([key]) => key === BACKGROUND_STORAGE_KEY)?.[1];
+
+        if (storedTheme && storedTheme in THEME_PALETTES) {
+          setModeState(storedTheme as ThemeMode);
+        }
+
+        if (storedBackground && APP_BACKGROUND_OPTIONS.some((option) => option.id === storedBackground)) {
+          setBackgroundModeState(storedBackground as BackgroundMode);
         }
       })
       .catch(() => {});
   }, []);
 
-  const setMode = (nextMode: ThemeMode) => {
+  const setMode = useCallback((nextMode: ThemeMode) => {
     setModeState(nextMode);
     AsyncStorage.setItem(STORAGE_KEY, nextMode).catch(() => {});
-  };
+  }, []);
+
+  const setBackgroundMode = useCallback((nextMode: BackgroundMode) => {
+    setBackgroundModeState(nextMode);
+    AsyncStorage.setItem(BACKGROUND_STORAGE_KEY, nextMode).catch(() => {});
+  }, []);
 
   const value = useMemo(() => {
     const palette = THEME_PALETTES[mode];
+
     return {
       mode,
+      backgroundMode,
       palette,
       setMode,
-      isDark: mode === "dark",
-      navigationTheme: buildNavigationTheme(mode, palette),
+      setBackgroundMode,
+      isDark: palette.mode === "dark",
+      navigationTheme: buildNavigationTheme(palette),
     };
-  }, [mode]);
+  }, [backgroundMode, mode, setBackgroundMode, setMode]);
 
   return <AppThemeContext.Provider value={value}>{children}</AppThemeContext.Provider>;
 }

@@ -57,6 +57,8 @@ export default function AuthScreen() {
   const C = THEME_PALETTES.dark
   const styles = createStyles(C)
   const pageGradient: [string, string, string] = ['#0F0C29', '#1a1a4e', '#24243e']
+  const buttonGradient: [string, string, string] = ['#7F7FD5', '#86A8E7', '#91EAE4']
+  const overlayGradient: [string, string, string] = ['rgba(15,12,41,0.98)', 'rgba(22,20,56,0.96)', 'rgba(15,12,41,0.92)']
   const placeholderColor = 'rgba(255,255,255,0.3)'
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -529,7 +531,7 @@ export default function AuthScreen() {
             <Text style={styles.loggedInTitle}>Welcome Back! 🎉</Text>
             <Text style={styles.loggedInEmail}>{sessionEmail}</Text>
             <TouchableOpacity style={styles.logoutButton} onPress={signOut} disabled={loading}>
-              <LinearGradient colors={['#7F7FD5', '#86A8E7', '#91EAE4']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.gradientButton}>
+              <LinearGradient colors={buttonGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.gradientButton}>
                 {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Sign Out 👋</Text>}
               </LinearGradient>
             </TouchableOpacity>
@@ -650,7 +652,7 @@ export default function AuthScreen() {
                   {/* Sign in button */}
                   <Animated.View style={[styles.buttonWrapper, { opacity: fadeAnim, transform: [{ scale: fadeAnim.interpolate({ inputRange: [0, 1], outputRange: [0.8, 1] }) }] }]}>
                     <TouchableOpacity onPress={signIn} disabled={loading}>
-                      <LinearGradient colors={['#7F7FD5', '#86A8E7', '#91EAE4']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.gradientButton}>
+                      <LinearGradient colors={buttonGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.gradientButton}>
                         {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Sign In →</Text>}
                       </LinearGradient>
                     </TouchableOpacity>
@@ -681,7 +683,7 @@ export default function AuthScreen() {
       {showIntro && !sessionEmail && (
         <Animated.View pointerEvents="none" style={[styles.introOverlay, { opacity: introOverlayOpacity }]}>
           <LinearGradient
-            colors={['rgba(15,12,41,0.98)', 'rgba(22,20,56,0.96)', 'rgba(15,12,41,0.92)']}
+            colors={overlayGradient}
             start={{ x: 0.1, y: 0 }}
             end={{ x: 0.9, y: 1 }}
             style={StyleSheet.absoluteFillObject}
@@ -758,7 +760,7 @@ export default function AuthScreen() {
               ]}
             >
               <LinearGradient
-                colors={['#7F7FD5', '#86A8E7', '#91EAE4']}
+                colors={buttonGradient}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={styles.successStageEmojiWrap}
@@ -791,7 +793,7 @@ export default function AuthScreen() {
                 ]}
               >
                 <LinearGradient
-                  colors={['#7F7FD5', '#86A8E7', '#91EAE4']}
+                  colors={buttonGradient}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 1 }}
                   style={styles.welcomeBadge}

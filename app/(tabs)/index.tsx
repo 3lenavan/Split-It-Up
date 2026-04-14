@@ -4,14 +4,16 @@
  * Smooth entrance animations, glowing cards, animated balance summary.
  *****************************************************************************/
 import { supabase } from "@/lib/supabaseClient";
+import { AppBackground } from "@/lib/app-background";
 import { THEME_PALETTES, useAppTheme } from "@/lib/app-theme";
 import { useIsFocused } from "@react-navigation/native";
-import { Edit2, Receipt, Sparkles, Trash2, TrendingUp, Users } from "lucide-react-native";
+import { Edit2, House, Receipt, Trash2, TrendingUp, Users } from "lucide-react-native";
 import { useEffect, useRef, useState } from "react";
 import {
   Alert,
   Animated,
   AppState,
+  Easing,
   Keyboard,
   KeyboardAvoidingView,
   LayoutAnimation,
@@ -70,26 +72,48 @@ const splitDeleteAnimation = {
 
 // ── Animated entrance hook ────────────────────────────────────────────────────
 function useFadeSlide(delay = 0, isActive = true) {
+  const scale = useRef(new Animated.Value(0.82)).current;
   const opacity = useRef(new Animated.Value(0)).current;
-  const translateY = useRef(new Animated.Value(22)).current;
+  const translateY = useRef(new Animated.Value(24)).current;
 
   useEffect(() => {
     if (!isActive) {
+      scale.setValue(0.82);
       opacity.setValue(0);
-      translateY.setValue(22);
+      translateY.setValue(24);
       return;
     }
 
+    scale.setValue(0.82);
     opacity.setValue(0);
-    translateY.setValue(22);
+    translateY.setValue(24);
 
-    Animated.parallel([
-      Animated.timing(opacity, { toValue: 1, duration: 480, delay, useNativeDriver: true }),
-      Animated.spring(translateY, { toValue: 0, delay, tension: 80, friction: 12, useNativeDriver: true }),
+    Animated.sequence([
+      Animated.delay(delay),
+      Animated.parallel([
+        Animated.spring(scale, {
+          toValue: 1,
+          damping: 14,
+          stiffness: 160,
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacity, {
+          toValue: 1,
+          duration: 280,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.spring(translateY, {
+          toValue: 0,
+          damping: 14,
+          stiffness: 160,
+          useNativeDriver: true,
+        }),
+      ]),
     ]).start();
-  }, [delay, isActive, opacity, translateY]);
+  }, [delay, isActive, scale, opacity, translateY]);
 
-  return { opacity, transform: [{ translateY }] };
+  return { opacity, transform: [{ scale }, { translateY }] };
 }
 
 // ── Floating orb ──────────────────────────────────────────────────────────────
@@ -115,6 +139,8 @@ function FloatingOrb({ style }: { style?: any }) {
 type SplitCardProps = {
   split: Split;
   currentUserId: string | null;
+  entryDelay: number;
+  isFocused: boolean;
   onMenuOpen: (split: Split, position: { x: number; y: number }) => void;
   onDelete: (split: Split) => void;
   onRequestPayment: (split: Split) => void;
@@ -122,8 +148,9 @@ type SplitCardProps = {
   styles: HomeStyles;
 };
 
-function SplitCard({ split, currentUserId, onMenuOpen, onDelete, onRequestPayment, palette: C, styles }: SplitCardProps) {
+function SplitCard({ split, currentUserId, entryDelay, isFocused, onMenuOpen, onDelete, onRequestPayment, palette: C, styles }: SplitCardProps) {
   const menuButtonRef = useRef<View>(null);
+  const entryAnim = useFadeSlide(entryDelay, isFocused);
 
   const owedToYou = split.myBalance > 0 ? split.myBalance : 0;
   const youOwe = split.myBalance < 0 ? Math.abs(split.myBalance) : 0;
@@ -152,14 +179,15 @@ function SplitCard({ split, currentUserId, onMenuOpen, onDelete, onRequestPaymen
   );
 
   return (
-    <Swipeable
-      renderRightActions={renderRightActions}
-      overshootRight={false}
-      activeOffsetX={[-18, 18]}
-      failOffsetY={[-10, 10]}
-      dragOffsetFromRightEdge={24}
-    >
-      <View style={styles.card}>
+    <Animated.View style={entryAnim}>
+      <Swipeable
+        renderRightActions={renderRightActions}
+        overshootRight={false}
+        activeOffsetX={[-18, 18]}
+        failOffsetY={[-10, 10]}
+        dragOffsetFromRightEdge={24}
+      >
+        <View style={styles.card}>
           {/* top accent line */}
           <View style={[styles.cardAccentLine, { backgroundColor: statusColor }]} />
 
@@ -232,14 +260,15 @@ function SplitCard({ split, currentUserId, onMenuOpen, onDelete, onRequestPaymen
               </View>
             </View>
           )}
-      </View>
-    </Swipeable>
+        </View>
+      </Swipeable>
+    </Animated.View>
   );
 }
 
 // ── HomeScreen ────────────────────────────────────────────────────────────────
 export default function HomeScreen() {
-  const { palette } = useAppTheme();
+  const { palette, backgroundMode } = useAppTheme();
   const C = palette;
   const styles = createStyles(C);
   const [splits, setSplits] = useState<Split[]>([]);
@@ -259,10 +288,11 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
 
   // header anim
-  const headerAnim = useFadeSlide(0, isFocused);
-  const summaryAnim = useFadeSlide(80, isFocused);
-  const contentAnim = useFadeSlide(160, isFocused);
-  const listAnim = useFadeSlide(240, isFocused);
+  const headerAnim = useFadeSlide(60, isFocused);
+  const owedSummaryAnim = useFadeSlide(140, isFocused);
+  const oweSummaryAnim = useFadeSlide(180, isFocused);
+  const splitsSummaryAnim = useFadeSlide(220, isFocused);
+  const contentAnim = useFadeSlide(260, isFocused);
 
   useEffect(() => {
     if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -607,8 +637,13 @@ export default function HomeScreen() {
   return (
     <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
     <SafeAreaView style={styles.safe}>
-      <FloatingOrb style={styles.orb1} />
-      <FloatingOrb style={styles.orb2} />
+      <AppBackground />
+      {backgroundMode === "default" ? (
+        <>
+          <FloatingOrb style={styles.orb1} />
+          <FloatingOrb style={styles.orb2} />
+        </>
+      ) : null}
 
       <ScrollView
         contentContainerStyle={styles.scroll}
@@ -629,7 +664,7 @@ export default function HomeScreen() {
         <Animated.View style={[styles.header, headerAnim]}>
           <View style={styles.headerLeft}>
             <View style={styles.sparkleWrap}>
-              <Sparkles size={18} color={C.accent} />
+              <House size={18} color={C.accent} />
             </View>
             <View>
               <Text style={styles.headerEyebrow}>Overview</Text>
@@ -642,23 +677,23 @@ export default function HomeScreen() {
         </Animated.View>
 
         {/* ── SUMMARY CARDS ── */}
-        <Animated.View style={[styles.summaryRow, summaryAnim]}>
-          <View style={[styles.summaryCard, { borderColor: C.green + "44" }]}>
+        <View style={styles.summaryRow}>
+          <Animated.View style={[styles.summaryCard, { borderColor: C.green + "44" }, owedSummaryAnim]}>
             <TrendingUp size={14} color={C.green} />
             <Text style={styles.summaryLabel}>You are owed</Text>
             <Text style={[styles.summaryValue, { color: C.green }]}>${totalOwed.toFixed(2)}</Text>
-          </View>
-          <View style={[styles.summaryCard, { borderColor: C.red + "44" }]}>
+          </Animated.View>
+          <Animated.View style={[styles.summaryCard, { borderColor: C.red + "44" }, oweSummaryAnim]}>
             <TrendingUp size={14} color={C.red} style={{ transform: [{ rotate: "180deg" }] }} />
             <Text style={styles.summaryLabel}>You owe</Text>
             <Text style={[styles.summaryValue, { color: C.red }]}>${totalOwe.toFixed(2)}</Text>
-          </View>
-          <View style={[styles.summaryCard, { borderColor: C.accent + "44" }]}>
+          </Animated.View>
+          <Animated.View style={[styles.summaryCard, { borderColor: C.accent + "44" }, splitsSummaryAnim]}>
             <Receipt size={14} color={C.accent} />
             <Text style={styles.summaryLabel}>Splits</Text>
             <Text style={[styles.summaryValue, { color: C.accent }]}>{splits.length}</Text>
-          </View>
-        </Animated.View>
+          </Animated.View>
+        </View>
 
         {/* ── SPLITS LIST ── */}
         {loading && (
@@ -677,12 +712,14 @@ export default function HomeScreen() {
           </Animated.View>
         )}
 
-        <Animated.View style={listAnim}>
-          {splits.map((split) => (
+        <View>
+          {splits.map((split, index) => (
             <SplitCard
               key={split.id}
               split={split}
               currentUserId={currentUserId}
+              entryDelay={280 + Math.min(index, 6) * 45}
+              isFocused={isFocused}
               onMenuOpen={openActionMenu}
               onDelete={confirmDeleteSplit}
               onRequestPayment={handleRequestPayment}
@@ -690,7 +727,7 @@ export default function HomeScreen() {
               styles={styles}
             />
           ))}
-        </Animated.View>
+        </View>
       </ScrollView>
 
       {/* ── ACTION POPOVER ── */}
@@ -833,8 +870,8 @@ return StyleSheet.create({
   safe: { flex: 1, backgroundColor: C.bg },
   scroll: { paddingHorizontal: 16, paddingTop: 20, paddingBottom: 140 },
 
-  orb1: { position: "absolute", width: 300, height: 300, borderRadius: 150, backgroundColor: "#7c3aed", top: -100, right: -80 },
-  orb2: { position: "absolute", width: 220, height: 220, borderRadius: 110, backgroundColor: "#1d4ed8", bottom: 100, left: -70 },
+  orb1: { position: "absolute", width: 300, height: 300, borderRadius: 150, backgroundColor: C.orbPrimary, top: -100, right: -80 },
+  orb2: { position: "absolute", width: 220, height: 220, borderRadius: 110, backgroundColor: C.orbSecondary, bottom: 100, left: -70 },
 
   // header
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 20 },
@@ -909,7 +946,7 @@ return StyleSheet.create({
   popoverDivider: { height: 1, backgroundColor: C.border, marginHorizontal: 10 },
 
   // edit modal
-  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", paddingHorizontal: 16 },
+  modalOverlay: { flex: 1, backgroundColor: C.mode === "dark" ? `${C.bg}d9` : "rgba(24,24,38,0.24)", justifyContent: "center", paddingHorizontal: 16 },
   modalKeyboardWrap: { flex: 1, justifyContent: "center" },
   modalSheet: { backgroundColor: C.card, borderRadius: 28, padding: 20, paddingBottom: 24, maxHeight: "78%", borderWidth: 1, borderColor: C.border, shadowColor: "#000", shadowOpacity: 0.22, shadowRadius: 24, shadowOffset: { width: 0, height: 10 }, elevation: 10 },
   modalSheetContent: {},

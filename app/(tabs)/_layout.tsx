@@ -8,13 +8,15 @@ import { Animated, Platform, Pressable, StyleSheet, Text, View } from "react-nat
 
 import { useAppTheme } from "@/lib/app-theme";
 import { IconSymbol } from "@/components/ui/icon-symbol";
+import { supabase } from "@/lib/supabaseClient";
 
-type TabRouteName = "index" | "add" | "profile";
+type TabRouteName = "index" | "add" | "inbox" | "profile";
 
 function getTabMeta(routeName: string) {
-  const mapping: Record<TabRouteName, { label: string; icon: "house.fill" | "plus.circle.fill" | "person.fill" }> = {
+  const mapping: Record<TabRouteName, { label: string; icon: "house.fill" | "plus.circle.fill" | "bell.fill" | "person.fill" }> = {
     index: { label: "Home", icon: "house.fill" },
     add: { label: "Add", icon: "plus.circle.fill" },
+    inbox: { label: "Inbox", icon: "bell.fill" },
     profile: { label: "Profile", icon: "person.fill" },
   };
 
@@ -32,11 +34,7 @@ function BottomEdgeMask({
     <View pointerEvents="none" style={styles.bottomMaskWrap}>
       <BlurView intensity={28} tint={colors.mode === "dark" ? "dark" : "light"} style={StyleSheet.absoluteFill} />
       <LinearGradient
-        colors={
-          colors.mode === "dark"
-            ? ["rgba(7,7,15,0.12)", "rgba(7,7,15,0.8)", "rgba(7,7,15,0.98)"]
-            : ["rgba(245,247,255,0.16)", "rgba(245,247,255,0.84)", "rgba(245,247,255,0.98)"]
-        }
+        colors={[`${colors.bg}1f`, `${colors.bg}d6`, `${colors.bg}fa`]}
         locations={[0, 0.55, 1]}
         start={{ x: 0.5, y: 0 }}
         end={{ x: 0.5, y: 1 }}
@@ -62,9 +60,11 @@ function CustomTabBar({
   const scaleY = useRef(new Animated.Value(1)).current;
   const glowOpacity = useRef(new Animated.Value(0.16)).current;
   const activeOpacity = useRef(new Animated.Value(0)).current;
+  const [inboxCount, setInboxCount] = useState(0);
 
   const segmentWidth = barWidth > 0 ? barWidth / state.routes.length : 0;
-  const pillWidth = segmentWidth > 0 ? Math.min(118, Math.max(96, segmentWidth - 16)) : 108;
+  const pillWidth = segmentWidth > 0 ? Math.max(68, segmentWidth - 8) : 78;
+  const showActiveLabel = pillWidth >= 92;
   const targetX = segmentWidth > 0 ? state.index * segmentWidth + (segmentWidth - pillWidth) / 2 : 0;
   const activeMeta = getTabMeta(state.routes[state.index]?.name ?? "index");
 
@@ -124,16 +124,67 @@ function CustomTabBar({
     ]).start();
   }, [activeOpacity, barWidth, glowOpacity, scaleX, scaleY, state.index, targetX, translateX]);
 
+  useEffect(() => {
+    let active = true;
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+
+    const loadInboxCount = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      const currentUserId = session?.user?.id;
+
+      if (!currentUserId) {
+        if (active) setInboxCount(0);
+        return;
+      }
+
+      const [friendResult, moneyResult] = await Promise.all([
+        supabase
+          .from("friend_requests")
+          .select("id", { count: "exact", head: true })
+          .eq("addressee_id", currentUserId)
+          .eq("status", "pending"),
+        supabase
+          .from("money_requests")
+          .select("id", { count: "exact", head: true })
+          .eq("owner_id", currentUserId)
+          .eq("status", "pending"),
+      ]);
+
+      if (friendResult.error) console.error("Error counting friend requests:", friendResult.error);
+      if (moneyResult.error) console.error("Error counting money requests:", moneyResult.error);
+
+      if (active) setInboxCount((friendResult.count ?? 0) + (moneyResult.count ?? 0));
+    };
+
+    supabase.auth.getSession().then(({ data }) => {
+      const currentUserId = data.session?.user?.id;
+      loadInboxCount();
+      if (!active || !currentUserId) return;
+
+      channel = supabase
+        .channel(`tab-inbox-count-${currentUserId}`)
+        .on("postgres_changes", { event: "*", schema: "public", table: "friend_requests", filter: `addressee_id=eq.${currentUserId}` }, loadInboxCount)
+        .on("postgres_changes", { event: "*", schema: "public", table: "money_requests", filter: `owner_id=eq.${currentUserId}` }, loadInboxCount)
+        .subscribe();
+    });
+
+    const { data: authListener } = supabase.auth.onAuthStateChange(() => {
+      loadInboxCount();
+    });
+
+    return () => {
+      active = false;
+      authListener.subscription.unsubscribe();
+      if (channel) supabase.removeChannel(channel);
+    };
+  }, []);
+
   return (
     <View style={styles.tabBar}>
       <View style={styles.backgroundWrap} onLayout={(event) => setBarWidth(event.nativeEvent.layout.width)}>
         <BlurView intensity={60} tint={colors.mode === "dark" ? "dark" : "light"} style={StyleSheet.absoluteFill} />
         <LinearGradient
-          colors={
-            colors.mode === "dark"
-              ? ["rgba(24,24,38,0.94)", "rgba(10,10,18,0.9)"]
-              : ["rgba(255,255,255,0.94)", "rgba(239,243,255,0.92)"]
-          }
+          colors={[`${colors.tabSurface}f0`, `${colors.tabSurfaceSoft}eb`]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={StyleSheet.absoluteFill}
@@ -152,7 +203,7 @@ function CustomTabBar({
             ]}
           >
             <LinearGradient
-              colors={["rgba(168,85,247,0.28)", "rgba(56,189,248,0.18)"]}
+              colors={[`${colors.accent}47`, `${colors.blue}2e`]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
               style={styles.activeTabPill}
@@ -161,8 +212,13 @@ function CustomTabBar({
               <View style={styles.activeTabContent}>
                 <View style={styles.activeIconShell}>
                   <IconSymbol size={21} name={activeMeta.icon} color={colors.tabText} />
+                  {state.routes[state.index]?.name === "inbox" && inboxCount > 0 ? (
+                    <View style={styles.tabBadge}>
+                      <Text style={styles.tabBadgeText}>{inboxCount > 99 ? "99+" : inboxCount}</Text>
+                    </View>
+                  ) : null}
                 </View>
-                <Text style={styles.activeTabLabel}>{activeMeta.label}</Text>
+                {showActiveLabel ? <Text style={styles.activeTabLabel}>{activeMeta.label}</Text> : null}
               </View>
             </LinearGradient>
           </Animated.View>
@@ -172,6 +228,7 @@ function CustomTabBar({
           {state.routes.map((route, index) => {
             const focused = state.index === index;
             const meta = getTabMeta(route.name);
+            const routeBadgeCount = route.name === "inbox" ? inboxCount : 0;
 
             const onPress = () => {
               if (Platform.OS === "ios") {
@@ -208,7 +265,14 @@ function CustomTabBar({
                 style={styles.tabButton}
               >
                 <View style={[styles.inactiveTab, focused && styles.hiddenTabContent]}>
-                  <IconSymbol size={21} name={meta.icon} color={colors.tabTextMuted} />
+                  <View style={styles.inactiveIconWrap}>
+                    <IconSymbol size={21} name={meta.icon} color={colors.tabTextMuted} />
+                    {routeBadgeCount > 0 ? (
+                      <View style={styles.tabBadge}>
+                        <Text style={styles.tabBadgeText}>{routeBadgeCount > 99 ? "99+" : routeBadgeCount}</Text>
+                      </View>
+                    ) : null}
+                  </View>
                   <Text style={styles.inactiveTabLabel}>{meta.label}</Text>
                 </View>
               </Pressable>
@@ -238,6 +302,7 @@ export default function TabLayout() {
       >
         <Tabs.Screen name="index" options={{ title: "Home" }} />
         <Tabs.Screen name="add" options={{ title: "Add" }} />
+        <Tabs.Screen name="inbox" options={{ title: "Inbox" }} />
         <Tabs.Screen name="profile" options={{ title: "Profile" }} />
       </Tabs>
       <BottomEdgeMask styles={styles} colors={C} />
@@ -304,7 +369,7 @@ const createStyles = (C: ReturnType<typeof useAppTheme>["palette"]) => StyleShee
     flex: 1,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: "rgba(168,85,247,0.35)",
+    borderColor: `${C.accent}59`,
     shadowColor: C.accent,
     shadowOpacity: 0.3,
     shadowRadius: 18,
@@ -313,25 +378,42 @@ const createStyles = (C: ReturnType<typeof useAppTheme>["palette"]) => StyleShee
   },
   activePillGlow: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(255,255,255,0.12)",
+    backgroundColor: C.mode === "dark" ? "rgba(255,255,255,0.12)" : `${C.accent}12`,
   },
   activeTabContent: {
     width: "100%",
     height: "100%",
-    paddingHorizontal: 14,
+    paddingHorizontal: 8,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
+    gap: 6,
   },
   activeIconShell: {
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: "rgba(255,255,255,0.1)",
+    backgroundColor: C.accentDim,
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
+  },
+  inactiveIconWrap: { position: "relative", width: 28, height: 24, alignItems: "center", justifyContent: "center" },
+  tabBadge: {
+    position: "absolute",
+    top: -9,
+    right: -14,
+    minWidth: 19,
+    height: 19,
+    borderRadius: 10,
+    paddingHorizontal: 5,
+    backgroundColor: C.red,
+    borderWidth: 1,
+    borderColor: C.tabSurface,
     alignItems: "center",
     justifyContent: "center",
   },
+  tabBadgeText: { color: "#fff", fontSize: 9, fontWeight: "900", lineHeight: 11 },
   activeTabLabel: {
     color: C.tabText,
     fontSize: 12,

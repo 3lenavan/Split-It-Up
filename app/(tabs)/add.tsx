@@ -5,6 +5,7 @@
  * built-in Animated API (no extra deps needed).
  *****************************************************************************/
 import { createSplit } from "@/lib/split";
+import { AppBackground } from "@/lib/app-background";
 import { THEME_PALETTES, useAppTheme } from "@/lib/app-theme";
 import { supabase } from "@/lib/supabaseClient";
 import * as Haptics from "expo-haptics";
@@ -22,6 +23,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   Alert,
   Animated,
+  Easing,
   Keyboard,
   Platform,
   Pressable,
@@ -44,31 +46,47 @@ let styles = createStyles(C);
 
 // ── Animated entrance hook ───────────────────────────────────────────────────
 function useFadeSlide(delay = 0, isActive = true) {
+  const scale = useRef(new Animated.Value(0.82)).current;
   const opacity = useRef(new Animated.Value(0)).current;
-  const translateY = useRef(new Animated.Value(22)).current;
+  const translateY = useRef(new Animated.Value(24)).current;
 
   useEffect(() => {
     if (!isActive) {
+      scale.setValue(0.82);
       opacity.setValue(0);
-      translateY.setValue(22);
+      translateY.setValue(24);
       return;
     }
 
+    scale.setValue(0.82);
     opacity.setValue(0);
-    translateY.setValue(22);
+    translateY.setValue(24);
 
-    Animated.parallel([
-      Animated.timing(opacity, {
-        toValue: 1, duration: 480, delay,
-        useNativeDriver: true,
-      }),
-      Animated.spring(translateY, {
-        toValue: 0, delay, tension: 80, friction: 12,
-        useNativeDriver: true,
-      }),
+    Animated.sequence([
+      Animated.delay(delay),
+      Animated.parallel([
+        Animated.spring(scale, {
+          toValue: 1,
+          damping: 14,
+          stiffness: 160,
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacity, {
+          toValue: 1,
+          duration: 280,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.spring(translateY, {
+          toValue: 0,
+          damping: 14,
+          stiffness: 160,
+          useNativeDriver: true,
+        }),
+      ]),
     ]).start();
-  }, [delay, isActive, opacity, translateY]);
-  return { opacity, transform: [{ translateY }] };
+  }, [delay, isActive, scale, opacity, translateY]);
+  return { opacity, transform: [{ scale }, { translateY }] };
 }
 
 // ── Pulsing orb background ────────────────────────────────────────────────────
@@ -184,7 +202,7 @@ export default function AddScreen({
 }: {
   onSplitCreated?: () => void;
 }) {
-  const { palette } = useAppTheme();
+  const { palette, backgroundMode } = useAppTheme();
   C = { ...palette, accentGlow: `${palette.accent}50` };
   styles = createStyles(C);
   const isFocused = useIsFocused();
@@ -198,11 +216,11 @@ export default function AddScreen({
   const [refreshing, setRefreshing] = useState(false);
 
   // entrance animations
-  const headerAnim = useFadeSlide(0, isFocused);
-  const card1Anim = useFadeSlide(80, isFocused);
-  const card2Anim = useFadeSlide(160, isFocused);
-  const card3Anim = useFadeSlide(240, isFocused);
-  const btnAnim = useFadeSlide(320, isFocused);
+  const headerAnim = useFadeSlide(60, isFocused);
+  const card1Anim = useFadeSlide(140, isFocused);
+  const card2Anim = useFadeSlide(210, isFocused);
+  const card3Anim = useFadeSlide(280, isFocused);
+  const btnAnim = useFadeSlide(350, isFocused);
 
   // button press scale
   const btnScale = useRef(new Animated.Value(1)).current;
@@ -289,9 +307,13 @@ export default function AddScreen({
   return (
     <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
       <SafeAreaView edges={["top", "left", "right"]} style={styles.safe}>
-        {/* background orbs */}
-        <FloatingOrb style={styles.orb1} />
-        <FloatingOrb style={styles.orb2} />
+        <AppBackground />
+        {backgroundMode === "default" ? (
+          <>
+            <FloatingOrb style={styles.orb1} />
+            <FloatingOrb style={styles.orb2} />
+          </>
+        ) : null}
 
         <ScrollView
           contentContainerStyle={styles.scroll}
@@ -311,7 +333,7 @@ export default function AddScreen({
           <Animated.View style={[styles.header, headerAnim]}>
             <View style={styles.headerLeft}>
               <View style={styles.sparkleWrap}>
-                <Sparkles size={18} color={C.accent} />
+                <Plus size={18} color={C.accent} />
               </View>
               <View>
                 <Text style={styles.headerEyebrow}>New</Text>
@@ -537,12 +559,12 @@ return StyleSheet.create({
   // background orbs
   orb1: {
     position: "absolute", width: 280, height: 280, borderRadius: 140,
-    backgroundColor: "#7c3aed",
+    backgroundColor: C.orbPrimary,
     top: -80, right: -80,
   },
   orb2: {
     position: "absolute", width: 200, height: 200, borderRadius: 100,
-    backgroundColor: "#4f46e5",
+    backgroundColor: C.orbSecondary,
     bottom: 120, left: -60,
   },
 
@@ -657,11 +679,11 @@ return StyleSheet.create({
   },
   chipAvatar: {
     width: 38, height: 38, borderRadius: 19,
-    backgroundColor: "#4f46e522",
+    backgroundColor: C.accentDim,
     justifyContent: "center", alignItems: "center",
-    borderWidth: 1, borderColor: "#4f46e555",
+    borderWidth: 1, borderColor: C.accent + "55",
   },
-  chipAvatarText: { color: "#818cf8", fontWeight: "700", fontSize: 14 },
+  chipAvatarText: { color: C.accentBright, fontWeight: "700", fontSize: 14 },
   chipName: { fontSize: 14, fontWeight: "600", color: C.textPrimary },
   chipHandle: { fontSize: 11, color: C.textSecondary, marginTop: 1 },
   chipAmount: { flexDirection: "row", alignItems: "center", gap: 2 },

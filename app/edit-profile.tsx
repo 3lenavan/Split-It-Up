@@ -1,4 +1,8 @@
+import * as ImagePicker from "expo-image-picker";
 import { useAppTheme } from "@/lib/app-theme";
+import { AppBackground } from "@/lib/app-background";
+import { AVATAR_DECORATIONS, AvatarDecoration, getAvatarDecoration } from "@/lib/avatar-decoration";
+import { isLocalProfileImage, uploadProfileImage } from "@/lib/profile-image";
 import { supabase } from "@/lib/supabaseClient";
 import { useIsFocused } from "@react-navigation/native";
 import { router } from "expo-router";
@@ -8,6 +12,8 @@ import {
   Alert,
   Animated,
   Keyboard,
+  Image,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -68,13 +74,18 @@ function FloatingOrb({ style }: { style?: any }) {
 
 export default function EditProfileScreen() {
   const isFocused = useIsFocused();
-  const { palette: C } = useAppTheme();
+  const { palette: C, backgroundMode } = useAppTheme();
   const styles = createStyles(C);
   const [fullName, setFullName] = useState("");
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [initialFullName, setInitialFullName] = useState("");
   const [initialUsername, setInitialUsername] = useState("");
+  const [avatarUri, setAvatarUri] = useState<string | null>(null);
+  const [initialAvatarUrl, setInitialAvatarUrl] = useState<string | null>(null);
+  const [avatarDecoration, setAvatarDecoration] = useState("none");
+  const [initialAvatarDecoration, setInitialAvatarDecoration] = useState("none");
+  const [decorationModalVisible, setDecorationModalVisible] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const headerAnim = useFadeSlide(0, isFocused);
@@ -99,7 +110,7 @@ export default function EditProfileScreen() {
         return;
       }
 
-      const { data, error } = await supabase.from("profiles").select("full_name, username, email").eq("id", user.id).single();
+      const { data, error } = await supabase.from("profiles").select("*").eq("id", user.id).single();
       if (error) {
         console.error("Error loading editable profile:", error);
         return;
@@ -107,16 +118,63 @@ export default function EditProfileScreen() {
 
       const nextFullName = data?.full_name || "";
       const nextUsername = data?.username || "";
+      const metadata = user.user_metadata ?? {};
+      const nextAvatarDecoration = data?.avatar_decoration || metadata.avatar_decoration || "none";
 
       setFullName(nextFullName);
       setUsername(nextUsername);
       setEmail(data?.email || user.email || "");
+      setAvatarUri(data?.avatar_url || metadata.avatar_url || null);
+      setInitialAvatarUrl(data?.avatar_url || metadata.avatar_url || null);
+      setAvatarDecoration(nextAvatarDecoration);
+      setInitialAvatarDecoration(nextAvatarDecoration);
       setInitialFullName(nextFullName);
       setInitialUsername(nextUsername);
     };
 
     loadProfile();
   }, [isFocused]);
+
+  const pickImage = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert("Permission needed", "Please grant permission to access your photos.");
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.82,
+    });
+
+    if (!result.canceled) setAvatarUri(result.assets[0].uri);
+  };
+
+  const takePhoto = async () => {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert("Permission needed", "Please grant camera permission.");
+      return;
+    }
+
+    const result = await ImagePicker.launchCameraAsync({
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.82,
+    });
+
+    if (!result.canceled) setAvatarUri(result.assets[0].uri);
+  };
+
+  const showImageOptions = () => {
+    Alert.alert("Profile Picture", "Choose an option", [
+      { text: "Take Photo", onPress: takePhoto },
+      { text: "Choose from Gallery", onPress: pickImage },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  };
 
   const handleSave = async () => {
     const cleanFullName = fullName.trim();
@@ -135,12 +193,17 @@ export default function EditProfileScreen() {
 
       if (sessionError) throw sessionError;
       if (!user) throw new Error("No user session found.");
+      const nextAvatarUrl = avatarUri && isLocalProfileImage(avatarUri)
+        ? await uploadProfileImage(user.id, avatarUri)
+        : avatarUri;
 
       const { error: profileError } = await supabase
         .from("profiles")
         .update({
           full_name: cleanFullName,
           username: cleanUsername,
+          avatar_url: nextAvatarUrl,
+          avatar_decoration: avatarDecoration,
         })
         .eq("id", user.id);
 
@@ -150,6 +213,8 @@ export default function EditProfileScreen() {
         data: {
           full_name: cleanFullName,
           username: cleanUsername,
+          avatar_url: nextAvatarUrl,
+          avatar_decoration: avatarDecoration,
         },
       });
 
@@ -157,6 +222,9 @@ export default function EditProfileScreen() {
 
       setInitialFullName(cleanFullName);
       setInitialUsername(cleanUsername);
+      setAvatarUri(nextAvatarUrl ?? null);
+      setInitialAvatarUrl(nextAvatarUrl ?? null);
+      setInitialAvatarDecoration(avatarDecoration);
 
       Alert.alert("Saved", "Your profile details were updated.", [
         { text: "Nice", onPress: () => router.back() },
@@ -174,12 +242,21 @@ export default function EditProfileScreen() {
 
   const hasChanges =
     fullName.trim() !== initialFullName.trim() ||
-    username.trim().toLowerCase() !== initialUsername.trim().toLowerCase();
+    username.trim().toLowerCase() !== initialUsername.trim().toLowerCase() ||
+    (avatarUri ?? "") !== (initialAvatarUrl ?? "") ||
+    avatarDecoration !== initialAvatarDecoration;
+  const profileInitial = fullName.trim() ? fullName.trim().charAt(0).toUpperCase() : "?";
+  const selectedDecoration = getAvatarDecoration(avatarDecoration);
 
   return (
     <SafeAreaView edges={["top", "left", "right"]} style={styles.safeArea}>
-      <FloatingOrb style={styles.orb1} />
-      <FloatingOrb style={styles.orb2} />
+      <AppBackground />
+      {backgroundMode === "default" ? (
+        <>
+          <FloatingOrb style={styles.orb1} />
+          <FloatingOrb style={styles.orb2} />
+        </>
+      ) : null}
 
       <ScrollView
         contentContainerStyle={styles.container}
@@ -215,6 +292,33 @@ export default function EditProfileScreen() {
             </View>
             <View style={styles.sectionBadge}>
               <Text style={styles.sectionBadgeText}>Synced</Text>
+            </View>
+          </View>
+
+          <View style={styles.avatarEditor}>
+            <View style={styles.avatarPreviewWrap}>
+              <Pressable style={styles.avatarButton} onPress={showImageOptions} disabled={loading}>
+                {avatarUri ? (
+                  <Image source={{ uri: avatarUri }} style={styles.avatarImage} />
+                ) : (
+                  <View style={styles.avatarFallback}>
+                    <Text style={styles.avatarFallbackText}>{profileInitial}</Text>
+                  </View>
+                )}
+              </Pressable>
+              <AvatarDecoration decorationId={avatarDecoration} size={88} />
+            </View>
+            <View style={styles.avatarCopy}>
+              <Text style={styles.avatarTitle}>Profile picture</Text>
+              <Text style={styles.avatarSubtitle}>Tap the circle to choose a new photo.</Text>
+              <Pressable
+                style={styles.decorationButton}
+                onPress={() => setDecorationModalVisible(true)}
+                disabled={loading}
+              >
+                <Text style={styles.decorationButtonText}>Add Decoration</Text>
+              </Pressable>
+              <Text style={styles.decorationSelected}>Current: {selectedDecoration.name}</Text>
             </View>
           </View>
 
@@ -292,6 +396,48 @@ export default function EditProfileScreen() {
           </View>
         </Animated.View>
       </ScrollView>
+
+      <Modal
+        visible={decorationModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setDecorationModalVisible(false)}
+      >
+        <Pressable style={styles.decorationOverlay} onPress={() => setDecorationModalVisible(false)}>
+          <Pressable style={styles.decorationSheet} onPress={(event) => event.stopPropagation()}>
+            <Text style={styles.decorationModalTitle}>Avatar Decoration</Text>
+            <Text style={styles.decorationModalSubtitle}>Choose the frame you want on your profile.</Text>
+
+            <View style={styles.decorationGrid}>
+              {AVATAR_DECORATIONS.map((option) => {
+                const isSelected = option.id === avatarDecoration;
+
+                return (
+                  <Pressable
+                    key={option.id}
+                    style={[styles.decorationOption, isSelected && styles.decorationOptionSelected]}
+                    onPress={() => setAvatarDecoration(option.id)}
+                  >
+                    <View style={styles.decorationPreview}>
+                      <View style={styles.decorationPreviewAvatar}>
+                        <Text style={styles.decorationPreviewText}>{profileInitial}</Text>
+                      </View>
+                      <AvatarDecoration decorationId={option.id} size={64} />
+                    </View>
+                    <Text style={styles.decorationOptionName} numberOfLines={1}>
+                      {option.name}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            <Pressable style={styles.decorationDoneButton} onPress={() => setDecorationModalVisible(false)}>
+              <Text style={styles.decorationDoneText}>Done</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -317,6 +463,31 @@ const createStyles = (C: ReturnType<typeof useAppTheme>["palette"]) => StyleShee
   sectionTitle: { fontSize: 20, fontWeight: "800", color: C.textPrimary, letterSpacing: -0.4 },
   sectionBadge: { backgroundColor: C.surface, borderRadius: 999, borderWidth: 1, borderColor: C.border, paddingHorizontal: 10, paddingVertical: 6 },
   sectionBadgeText: { color: C.textSecondary, fontSize: 11, fontWeight: "700" },
+  avatarEditor: { flexDirection: "row", alignItems: "center", gap: 14, backgroundColor: C.surface, borderRadius: 18, borderWidth: 1, borderColor: C.border, padding: 14, marginBottom: 16 },
+  avatarPreviewWrap: { width: 88, height: 88, alignItems: "center", justifyContent: "center", position: "relative" },
+  avatarButton: { width: 72, height: 72, borderRadius: 36, overflow: "hidden", borderWidth: 2, borderColor: `${C.accent}55` },
+  avatarImage: { width: "100%", height: "100%" },
+  avatarFallback: { flex: 1, backgroundColor: C.accentDim, alignItems: "center", justifyContent: "center" },
+  avatarFallbackText: { color: C.accentBright, fontSize: 28, fontWeight: "800" },
+  avatarCopy: { flex: 1 },
+  avatarTitle: { color: C.textPrimary, fontSize: 15, fontWeight: "800", marginBottom: 4 },
+  avatarSubtitle: { color: C.textSecondary, fontSize: 12, lineHeight: 18 },
+  decorationButton: { alignSelf: "flex-start", backgroundColor: C.accent, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9, marginTop: 10, marginBottom: 6 },
+  decorationButtonText: { color: "#fff", fontSize: 12, fontWeight: "800" },
+  decorationSelected: { color: C.textSecondary, fontSize: 11, fontWeight: "600" },
+  decorationOverlay: { flex: 1, backgroundColor: C.mode === "dark" ? `${C.bg}d9` : "rgba(245,247,255,0.78)", justifyContent: "center", padding: 18 },
+  decorationSheet: { backgroundColor: C.cardBright, borderRadius: 22, borderWidth: 1, borderColor: C.borderBright, padding: 18 },
+  decorationModalTitle: { color: C.textPrimary, fontSize: 22, fontWeight: "800", letterSpacing: -0.4, marginBottom: 6 },
+  decorationModalSubtitle: { color: C.textSecondary, fontSize: 13, lineHeight: 19, marginBottom: 16 },
+  decorationGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  decorationOption: { width: "30.8%", minWidth: 92, flexGrow: 1, alignItems: "center", backgroundColor: C.surface, borderRadius: 14, borderWidth: 1, borderColor: C.border, paddingVertical: 12, paddingHorizontal: 8 },
+  decorationOptionSelected: { borderColor: C.accent, backgroundColor: C.accentDim },
+  decorationPreview: { width: 64, height: 64, position: "relative", alignItems: "center", justifyContent: "center", marginBottom: 9 },
+  decorationPreviewAvatar: { width: 48, height: 48, borderRadius: 24, backgroundColor: C.accentDeep, alignItems: "center", justifyContent: "center", overflow: "hidden" },
+  decorationPreviewText: { color: "#fff", fontSize: 19, fontWeight: "900" },
+  decorationOptionName: { color: C.textPrimary, fontSize: 11, fontWeight: "800", textAlign: "center" },
+  decorationDoneButton: { backgroundColor: C.accent, borderRadius: 14, paddingVertical: 14, alignItems: "center", marginTop: 16 },
+  decorationDoneText: { color: "#fff", fontSize: 14, fontWeight: "800" },
   fieldGroup: { marginBottom: 14 },
   fieldLabel: { color: C.textSecondary, fontSize: 11, fontWeight: "700", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 },
   inputShell: { flexDirection: "row", alignItems: "center", backgroundColor: C.surface, borderWidth: 1, borderColor: C.border, borderRadius: 16, paddingHorizontal: 14 },

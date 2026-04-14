@@ -24,6 +24,7 @@ import {
   View,
 } from 'react-native'
 import { THEME_PALETTES } from '../lib/app-theme'
+import { uploadProfileImage } from '../lib/profile-image'
 import { supabase } from '../lib/supabaseClient'
 
 const PRONOUN_OPTIONS = [
@@ -83,6 +84,7 @@ export default function SignUpScreen() {
   C = THEME_PALETTES.dark
   styles = createStyles(C)
   const pageGradient: [string, string, string] = ['#0F0C29', '#1a1a4e', '#24243e']
+  const buttonGradient: [string, string, string] = ['#7F7FD5', '#86A8E7', '#91EAE4']
   const placeholderColor = 'rgba(255,255,255,0.3)'
   const [fullName, setFullName] = useState('')
   const [username, setUsername] = useState('')
@@ -230,11 +232,51 @@ export default function SignUpScreen() {
         password,
         options: { data: { full_name: cleanFullName, username: cleanUsername } },
       })
-      setLoading(false)
+
       if (error || !data.user) {
+        setLoading(false)
         Alert.alert('Sign up error', error?.message ?? 'No user returned')
         return
       }
+      let avatarUrl: string | null = null
+      let avatarUploadError: unknown = null
+
+      if (profileImage) {
+        try {
+          avatarUrl = await uploadProfileImage(data.user.id, profileImage)
+          const { error: profileError } = await supabase
+            .from('profiles')
+            .upsert({
+              id: data.user.id,
+              full_name: cleanFullName,
+              username: cleanUsername,
+              email: cleanEmail,
+              avatar_url: avatarUrl,
+            })
+
+          if (profileError) throw profileError
+
+          const { error: authError } = await supabase.auth.updateUser({
+            data: { full_name: cleanFullName, username: cleanUsername, avatar_url: avatarUrl },
+          })
+
+          if (authError) throw authError
+        } catch (avatarError) {
+          console.error('Profile image upload failed:', avatarError)
+          avatarUploadError = avatarError
+        }
+      }
+
+      setLoading(false)
+      if (avatarUploadError) {
+        Alert.alert(
+          'Account created',
+          'Your account was created, but your profile picture could not be saved yet. You can try again from Edit Profile.',
+          [{ text: 'Go to Login', onPress: () => router.push('/auth') }]
+        )
+        return
+      }
+
       Alert.alert('Success!', 'Your account has been created! Please login.', [
         { text: 'Go to Login', onPress: () => router.push('/auth') },
       ])
@@ -449,7 +491,7 @@ export default function SignUpScreen() {
 
                   <Animated.View style={[styles.buttonWrapper, { opacity: fadeAnim, transform: [{ scale: fadeAnim.interpolate({ inputRange: [0, 1], outputRange: [0.84, 1] }) }] }]}>
                     <TouchableOpacity onPress={signUp} disabled={loading}>
-                      <LinearGradient colors={['#7F7FD5', '#86A8E7', '#91EAE4']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.gradientButton}>
+                      <LinearGradient colors={buttonGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.gradientButton}>
                         {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Create Account →</Text>}
                       </LinearGradient>
                     </TouchableOpacity>

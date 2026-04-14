@@ -1,33 +1,57 @@
-import { supabase } from "@/lib/supabaseClient";
+import { AppBackground } from "@/lib/app-background";
 import { useAppTheme } from "@/lib/app-theme";
+import { AvatarDecoration } from "@/lib/avatar-decoration";
+import { supabase } from "@/lib/supabaseClient";
 import { useIsFocused } from "@react-navigation/native";
 import { router } from "expo-router";
-import { Check, ChevronDown, ChevronUp, Search, Settings2, Sparkles, UserPlus, X } from "lucide-react-native";
+import { Check, ChevronDown, ChevronUp, Search, Settings2, UserPlus, UserRound, X } from "lucide-react-native";
 import { useEffect, useRef, useState } from "react";
-import { Animated, Keyboard, LayoutAnimation, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableWithoutFeedback, UIManager, View } from "react-native";
+import { Animated, Easing, Image, Keyboard, LayoutAnimation, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableWithoutFeedback, UIManager, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 function useFadeSlide(delay = 0, isActive = true) {
+  const scale = useRef(new Animated.Value(0.82)).current;
   const opacity = useRef(new Animated.Value(0)).current;
-  const translateY = useRef(new Animated.Value(22)).current;
+  const translateY = useRef(new Animated.Value(24)).current;
 
   useEffect(() => {
     if (!isActive) {
+      scale.setValue(0.82);
       opacity.setValue(0);
-      translateY.setValue(22);
+      translateY.setValue(24);
       return;
     }
 
+    scale.setValue(0.82);
     opacity.setValue(0);
-    translateY.setValue(22);
+    translateY.setValue(24);
 
-    Animated.parallel([
-      Animated.timing(opacity, { toValue: 1, duration: 480, delay, useNativeDriver: true }),
-      Animated.spring(translateY, { toValue: 0, delay, tension: 80, friction: 12, useNativeDriver: true }),
+    Animated.sequence([
+      Animated.delay(delay),
+      Animated.parallel([
+        Animated.spring(scale, {
+          toValue: 1,
+          damping: 14,
+          stiffness: 160,
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacity, {
+          toValue: 1,
+          duration: 280,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.spring(translateY, {
+          toValue: 0,
+          damping: 14,
+          stiffness: 160,
+          useNativeDriver: true,
+        }),
+      ]),
     ]).start();
-  }, [delay, isActive, opacity, translateY]);
+  }, [delay, isActive, scale, opacity, translateY]);
 
-  return { opacity, transform: [{ translateY }] };
+  return { opacity, transform: [{ scale }, { translateY }] };
 }
 
 function FloatingOrb({ style }: { style?: any }) {
@@ -123,26 +147,24 @@ function SectionHeader({
 
 export default function ProfileScreen() {
   const isFocused = useIsFocused();
-  const { palette: C } = useAppTheme();
+  const { palette: C, backgroundMode } = useAppTheme();
   const styles = createStyles(C);
   const scrollRef = useRef<ScrollView>(null);
   const friendsSectionY = useRef(0);
   const [searchText, setSearchText] = useState("");
-  const [profile, setProfile] = useState({ name: "", username: "", email: "" });
+  const [profile, setProfile] = useState({ name: "", username: "", email: "", avatarUrl: "", avatarDecoration: "none" });
   const [friends, setFriends] = useState<any[]>([]);
   const [sentRequests, setSentRequests] = useState<string[]>([]);
-  const [pendingRequests, setPendingRequests] = useState<any[]>([]);
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [youreOwed, setYoureOwed] = useState(0);
   const [youOwe, setYouOwe] = useState(0);
   const [friendsExpanded, setFriendsExpanded] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  const headerAnim = useFadeSlide(0, isFocused);
-  const heroAnim = useFadeSlide(80, isFocused);
-  const searchAnim = useFadeSlide(160, isFocused);
-  const pendingAnim = useFadeSlide(240, isFocused);
-  const friendsAnim = useFadeSlide(320, isFocused);
+  const headerAnim = useFadeSlide(60, isFocused);
+  const heroAnim = useFadeSlide(140, isFocused);
+  const searchAnim = useFadeSlide(210, isFocused);
+  const friendsAnim = useFadeSlide(280, isFocused);
   const logoutAnim = useFadeSlide(400, isFocused);
   const logoutScale = useRef(new Animated.Value(1)).current;
   const farewellOpacity = useRef(new Animated.Value(0)).current;
@@ -150,7 +172,6 @@ export default function ProfileScreen() {
   const farewellSlide = useRef(new Animated.Value(20)).current;
   const farewellGlow = useRef(new Animated.Value(1)).current;
   const farewellProgress = useRef(new Animated.Value(0)).current;
-  const [moneyRequests, setMoneyRequests] = useState<any[]>([]);
 
   useEffect(() => {
     if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -163,26 +184,18 @@ export default function ProfileScreen() {
     const user = session?.user;
     if (!user) return console.log("No user session found");
     if (sessionError) return console.error("Error getting session:", sessionError);
-    const { data, error } = await supabase.from("profiles").select("full_name, username, email").eq("id", user.id).single();
+    const { data, error } = await supabase.from("profiles").select("*").eq("id", user.id).single();
     if (error) return console.error("Error loading profile:", error);
-    if (data) setProfile({ name: data.full_name || "", username: data.username || "", email: data.email || "" });
-  };
-
-  const loadPendingRequests = async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    const currentUserId = session?.user?.id;
-    if (!currentUserId) return;
-    const { data, error } = await supabase
-      .from("friend_requests")
-      .select(`id, requester_id, requester:profiles!requester_id ( full_name, username )`)
-      .eq("addressee_id", currentUserId)
-      .eq("status", "pending");
-    if (error) return console.error("Error loading pending requests:", error);
-    setPendingRequests(data?.map((request: any) => ({
-      id: request.id,
-      name: request.requester?.full_name || "",
-      username: request.requester?.username || "",
-    })) ?? []);
+    const metadata = user.user_metadata ?? {};
+    if (data) {
+      setProfile({
+        name: data.full_name || metadata.full_name || "",
+        username: data.username || metadata.username || "",
+        email: data.email || user.email || "",
+        avatarUrl: data.avatar_url || metadata.avatar_url || "",
+        avatarDecoration: data.avatar_decoration || metadata.avatar_decoration || "none",
+      });
+    }
   };
 
   const loadSentRequests = async () => {
@@ -246,8 +259,6 @@ export default function ProfileScreen() {
     if (!isFocused) return;
 
     loadProfile();
-    loadPendingRequests();
-    loadMoneyRequests();
     loadSentRequests();
     loadFriends();
     loadBalances();
@@ -265,8 +276,8 @@ export default function ProfileScreen() {
 
       channel = supabase
         .channel(`profile-money-requests-${currentUserId}`)
+        .on("postgres_changes", { event: "*", schema: "public", table: "profiles", filter: `id=eq.${currentUserId}` }, loadProfile)
         .on("postgres_changes", { event: "*", schema: "public", table: "money_requests", filter: `owner_id=eq.${currentUserId}` }, () => {
-          loadMoneyRequests();
           loadBalances();
         })
         .subscribe();
@@ -326,86 +337,6 @@ export default function ProfileScreen() {
     setSearchResults((prev) => prev.map((user) => user.id === addresseeId ? { ...user, isPending: true } : user));
   };
 
-  const handleAcceptRequest = async (requestId: string) => {
-    const { data: request, error: fetchError } = await supabase.from("friend_requests").select("*").eq("id", requestId).single();
-    if (fetchError) return console.error("Error fetching request:", fetchError);
-    const requesterId = request.requester_id;
-    const addresseeId = request.addressee_id;
-    const { error: updateError } = await supabase.from("friend_requests").update({ status: "accepted" }).eq("id", requestId);
-    if (updateError) return console.error("Error accepting request:", updateError);
-    const { error: friendError } = await supabase.from("friends").insert([
-      { user_id: requesterId, friend_id: addresseeId },
-      { user_id: addresseeId, friend_id: requesterId },
-    ]);
-    if (friendError) return console.error("Error adding friendship:", friendError);
-    console.log("Friend request accepted");
-    await loadPendingRequests();
-    await loadFriends();
-  };
-
-  const handleAcceptMoneyRequest = async (requestId: string) => {
-  const { data: request, error: fetchError } = await supabase
-    .from("money_requests")
-    .select("*")
-    .eq("id", requestId)
-    .single();
-
-  if (fetchError) return console.error("Error fetching money request:", fetchError);
-
-  const { split_id, requester_id, amount } = request;
-
-  const { data: memberRow, error: memberError } = await supabase
-    .from("split_members")
-    .select("id, share_amount")
-    .eq("split_id", split_id)
-    .eq("profile_id", requester_id)
-    .single();
-
-  if (memberError) return console.error("Error finding split member:", memberError);
-
-  let newAmount = Number(memberRow.share_amount ?? 0) + Number(amount);
-
-  if (newAmount > 0) newAmount = 0;
-
-  const { error: updateMemberError } = await supabase
-    .from("split_members")
-    .update({ share_amount: newAmount })
-    .eq("id", memberRow.id);
-
-  if (updateMemberError) return console.error("Error updating balance:", updateMemberError);
-
-  const { error: updateRequestError } = await supabase
-    .from("money_requests")
-    .update({ status: "accepted" })
-    .eq("id", requestId);
-
-  if (updateRequestError) return console.error("Error updating request:", updateRequestError);
-
-  console.log("Money request accepted");
-
-  await loadMoneyRequests();
-  await loadBalances();
-};
-
-const handleDeclineMoneyRequest = async (requestId: string) => {
-  const { error } = await supabase
-    .from("money_requests")
-    .update({ status: "declined" })
-    .eq("id", requestId);
-
-  if (error) return console.error("Error declining request:", error);
-
-  console.log("Money request declined");
-  await loadMoneyRequests();
-};
-
-  const handleDeclineRequest = async (requestId: string) => {
-    const { error } = await supabase.from("friend_requests").update({ status: "declined" }).eq("id", requestId);
-    if (error) return console.error("Error declining request:", error);
-    console.log("Friend request declined");
-    await loadPendingRequests();
-  };
-
   const scrollToFriendsSection = () => {
     if (!friendsExpanded) {
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -430,50 +361,11 @@ const handleDeclineMoneyRequest = async (requestId: string) => {
     setFriendsExpanded((prev) => !prev);
   };
 
-  const loadMoneyRequests = async () => {
-  const { data: { session } } = await supabase.auth.getSession();
-  const currentUserId = session?.user?.id;
-  if (!currentUserId) return;
-
-  const { data, error } = await supabase
-    .from("money_requests")
-    .select(`
-      id,
-      split_id,
-      requester_id,
-      amount,
-      status,
-      requester:profiles!requester_id (
-        full_name,
-        username
-      )
-    `)
-    .eq("owner_id", currentUserId)
-    .eq("status", "pending");
-
-  if (error) {
-    console.error("Error loading money requests:", error);
-    return;
-  }
-
-  setMoneyRequests(
-    data?.map((request: any) => ({
-      id: request.id,
-      splitId: request.split_id,
-      requesterId: request.requester_id,
-      amount: Number(request.amount),
-      name: request.requester?.full_name || "Unknown User",
-      username: request.requester?.username || "unknown",
-    })) ?? []
-  );
-};
   const refreshProfile = async () => {
     setRefreshing(true);
     try {
       await Promise.all([
         loadProfile(),
-        loadPendingRequests(),
-        loadMoneyRequests(),
         loadSentRequests(),
         loadFriends(),
         loadBalances(),
@@ -492,8 +384,13 @@ const handleDeclineMoneyRequest = async (requestId: string) => {
   return (
     <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
     <SafeAreaView edges={["top", "left", "right"]} style={styles.safeArea}>
-      <FloatingOrb style={styles.orb1} />
-      <FloatingOrb style={styles.orb2} />
+      <AppBackground />
+      {backgroundMode === "default" ? (
+        <>
+          <FloatingOrb style={styles.orb1} />
+          <FloatingOrb style={styles.orb2} />
+        </>
+      ) : null}
       <ScrollView
         ref={scrollRef}
         contentContainerStyle={styles.container}
@@ -511,7 +408,7 @@ const handleDeclineMoneyRequest = async (requestId: string) => {
       >
         <Animated.View style={[styles.header, headerAnim]}>
           <View style={styles.headerLeft}>
-            <View style={styles.sparkleWrap}><Sparkles size={18} color={C.accent} /></View>
+            <View style={styles.sparkleWrap}><UserRound size={18} color={C.accent} /></View>
             <View>
               <Text style={styles.headerEyebrow}>Account</Text>
               <Text style={styles.headerTitle}>Profile</Text>
@@ -529,7 +426,19 @@ const handleDeclineMoneyRequest = async (requestId: string) => {
           <View style={styles.heroGlow} />
           <View style={styles.profileHeader}>
             <View style={styles.avatarHalo}>
-              <View style={styles.avatar}><Text style={styles.avatarText}>{profileInitial}</Text></View>
+              <View style={styles.avatar}>
+                {profile.avatarUrl ? (
+                  <Image
+                    source={{ uri: profile.avatarUrl }}
+                    style={styles.avatarImage}
+                    resizeMode="cover"
+                    onError={(event) => console.log("Profile image failed to load:", event.nativeEvent.error)}
+                  />
+                ) : (
+                  <Text style={styles.avatarText}>{profileInitial}</Text>
+                )}
+              </View>
+              <AvatarDecoration decorationId={profile.avatarDecoration} size={84} />
             </View>
             <View style={styles.profileInfo}>
               <Text style={styles.name}>{profile.name || " "}</Text>
@@ -610,81 +519,6 @@ const handleDeclineMoneyRequest = async (requestId: string) => {
           ))}
         </Animated.View>
 
-      <Animated.View style={[styles.glassCard, pendingAnim]}>
-  <SectionHeader
-    eyebrow="Inbox"
-    title="Friend Requests"
-    badge={`${pendingRequests.length}`}
-    styles={styles}
-  />
-          {pendingRequests.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyTitle}>No pending requests</Text>
-              <Text style={styles.emptySubtitle}>New friend requests will show up here.</Text>
-            </View>
-          ) : pendingRequests.map((request) => (
-            <View key={request.id} style={styles.pendingCard}>
-              <View style={styles.pendingInfo}>
-                <View style={styles.pendingAvatar}><Text style={styles.pendingAvatarText}>{request.name ? request.name.charAt(0).toUpperCase() : "?"}</Text></View>
-                <View>
-                  <Text style={styles.resultName}>{request.name}</Text>
-                  <Text style={styles.resultUsername}>@{request.username}</Text>
-                </View>
-              </View>
-              <View style={styles.requestActions}>
-                <Pressable style={styles.acceptButton} onPress={() => handleAcceptRequest(request.id)}><Text style={styles.requestButtonText}>Accept</Text></Pressable>
-                <Pressable style={styles.declineButton} onPress={() => handleDeclineRequest(request.id)}><Text style={styles.requestButtonText}>Decline</Text></Pressable>
-              </View>
-            </View>
-          ))}
-        </Animated.View>
-
-      <Animated.View style={[styles.glassCard, pendingAnim]}>
-  <SectionHeader
-  eyebrow="Inbox"
-  title="Money Requests"
-  badge={`${moneyRequests.length}`}
-  styles={styles}
-/>
-  {moneyRequests.length === 0 ? (
-    <View style={styles.emptyState}>
-      <Text style={styles.emptyTitle}>No pending money requests</Text>
-      <Text style={styles.emptySubtitle}>Money payoff requests will show up here.</Text>
-    </View>
-  ) : moneyRequests.map((request) => (
-    <View key={request.id} style={styles.pendingCard}>
-      <View style={styles.pendingInfo}>
-        <View style={styles.pendingAvatar}>
-          <Text style={styles.pendingAvatarText}>
-            {request.name ? request.name.charAt(0).toUpperCase() : "?"}
-          </Text>
-        </View>
-        <View>
-          <Text style={styles.resultName}>{request.name}</Text>
-          <Text style={styles.resultUsername}>@{request.username}</Text>
-          <Text style={styles.resultMutual}>Wants to pay: ${request.amount.toFixed(2)}</Text>
-        </View>
-      </View>
-
-      <View style={styles.requestActions}>
-    <Pressable
-    style={styles.acceptButton}
-    onPress={() => handleAcceptMoneyRequest(request.id)}
-  >
-    <Text style={styles.requestButtonText}>Accept</Text>
-  </Pressable>
-
-  <Pressable
-    style={styles.declineButton}
-    onPress={() => handleDeclineMoneyRequest(request.id)}
-  >
-    <Text style={styles.requestButtonText}>Decline</Text>
-  </Pressable>
-</View>
-    </View>
-  ))}
-</Animated.View>
-
         <Animated.View
           style={[styles.glassCard, friendsAnim]}
           onLayout={(event) => {
@@ -756,8 +590,9 @@ const createStyles = (C: ReturnType<typeof useAppTheme>["palette"]) => StyleShee
   heroCard: { backgroundColor: C.cardBright, borderRadius: 26, borderWidth: 1, borderColor: C.borderBright, padding: 20, marginBottom: 14, overflow: "hidden" },
   heroGlow: { position: "absolute", top: 0, left: "12%", right: "12%", height: 1, backgroundColor: C.accent, opacity: 0.25 },
   profileHeader: { flexDirection: "row", alignItems: "center", marginBottom: 18 },
-  avatarHalo: { width: 84, height: 84, borderRadius: 42, justifyContent: "center", alignItems: "center", backgroundColor: C.accentDim, borderWidth: 1, borderColor: `${C.accent}33`, marginRight: 16 },
-  avatar: { width: 68, height: 68, borderRadius: 34, backgroundColor: C.accentDeep, justifyContent: "center", alignItems: "center" },
+  avatarHalo: { width: 84, height: 84, borderRadius: 42, justifyContent: "center", alignItems: "center", backgroundColor: C.accentDim, borderWidth: 1, borderColor: `${C.accent}33`, marginRight: 16, position: "relative" },
+  avatar: { width: 68, height: 68, borderRadius: 34, backgroundColor: C.accentDeep, justifyContent: "center", alignItems: "center", overflow: "hidden" },
+  avatarImage: { width: "100%", height: "100%" },
   avatarText: { color: "#fff", fontSize: 28, fontWeight: "800" },
   profileInfo: { flex: 1 },
   name: { fontSize: 23, fontWeight: "800", color: C.textPrimary, letterSpacing: -0.5 },
@@ -852,8 +687,8 @@ const createStyles = (C: ReturnType<typeof useAppTheme>["palette"]) => StyleShee
     paddingTop: 2,
   },
   friendInfo: { flexDirection: "row", alignItems: "center" },
-  friendAvatar: { width: 42, height: 42, borderRadius: 21, backgroundColor: "#4f46e522", borderWidth: 1, borderColor: "#4f46e555", justifyContent: "center", alignItems: "center", marginRight: 12 },
-  friendAvatarText: { color: "#a5b4fc", fontSize: 15, fontWeight: "700" },
+  friendAvatar: { width: 42, height: 42, borderRadius: 21, backgroundColor: C.accentDim, borderWidth: 1, borderColor: `${C.accent}55`, justifyContent: "center", alignItems: "center", marginRight: 12 },
+  friendAvatarText: { color: C.accentBright, fontSize: 15, fontWeight: "700" },
   friendStatus: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: C.greenDim, borderRadius: 999, borderWidth: 1, borderColor: `${C.green}33`, paddingHorizontal: 10, paddingVertical: 6 },
   friendStatusText: { color: C.green, fontSize: 11, fontWeight: "800" },
   emptyState: { backgroundColor: C.surface, borderRadius: 16, borderWidth: 1, borderColor: C.border, paddingVertical: 22, paddingHorizontal: 16, alignItems: "center" },
