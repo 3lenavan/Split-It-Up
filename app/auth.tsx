@@ -1,6 +1,7 @@
 import type { Session } from '@supabase/supabase-js'
 import { LinearGradient } from 'expo-linear-gradient'
 import { useRouter } from 'expo-router'
+import { CheckCircle, Eye, EyeOff, LockKeyhole, Mail } from 'lucide-react-native'
 import { useEffect, useRef, useState } from 'react'
 import {
   ActivityIndicator,
@@ -74,8 +75,6 @@ export default function AuthScreen() {
   const introTimers = useRef<ReturnType<typeof setTimeout>[]>([])
 
   // Animation values — untouched
-  const [monkeyPosition] = useState(new Animated.Value(0))
-  const [eyeAnimation] = useState(new Animated.Value(0))
   const fadeAnim = useRef(new Animated.Value(0)).current
   const slideAnim = useRef(new Animated.Value(30)).current
   const scaleAnim = useRef(new Animated.Value(0.9)).current
@@ -103,6 +102,9 @@ export default function AuthScreen() {
   const loadingProgress = useRef(new Animated.Value(0)).current
 
   useEffect(() => {
+    const entryTimerList = entryTimers.current
+    const introTimerList = introTimers.current
+
     Animated.parallel([
       Animated.timing(fadeAnim, { toValue: 1, duration: 800, useNativeDriver: true, easing: Easing.out(Easing.cubic) }),
       Animated.timing(slideAnim, { toValue: 0, duration: 800, useNativeDriver: true, easing: Easing.out(Easing.cubic) }),
@@ -118,10 +120,10 @@ export default function AuthScreen() {
     )
     return () => {
       authListener.subscription.unsubscribe()
-      entryTimers.current.forEach((timer) => clearTimeout(timer))
-      introTimers.current.forEach((timer) => clearTimeout(timer))
+      entryTimerList.forEach((timer) => clearTimeout(timer))
+      introTimerList.forEach((timer) => clearTimeout(timer))
     }
-  }, [])
+  }, [fadeAnim, scaleAnim, slideAnim, titleSlideAnim])
 
   useEffect(() => {
     if (sessionEmail) {
@@ -338,14 +340,6 @@ export default function AuthScreen() {
     }
   }, [logoFloatAnim])
 
-  useEffect(() => {
-    Animated.sequence([
-      Animated.timing(monkeyPosition, { toValue: showPassword ? -10 : 10, duration: 300, useNativeDriver: true, easing: Easing.elastic(1) }),
-      Animated.timing(monkeyPosition, { toValue: 0, duration: 200, useNativeDriver: true, easing: Easing.bounce }),
-    ]).start()
-    Animated.timing(eyeAnimation, { toValue: showPassword ? 1 : 0, duration: 300, useNativeDriver: true }).start()
-  }, [showPassword])
-
   const validateInputs = () => {
     if (!email || !password) { Alert.alert('Oops!', 'Please fill in all fields'); return false }
     if (password.length < 6) { Alert.alert('Uh oh!', 'Password must be at least 6 characters'); return false }
@@ -526,13 +520,14 @@ export default function AuthScreen() {
         <SafeAreaView style={styles.safeArea}>
           <StatusBar barStyle="light-content" />
           <View style={styles.loggedInContent}>
-            <Animated.View style={[styles.successIcon, { transform: [{ translateY: monkeyPosition }] }]}>
-            </Animated.View>
-            <Text style={styles.loggedInTitle}>Welcome Back! 🎉</Text>
+            <View style={styles.successIcon}>
+              <CheckCircle size={64} color="#91EAE4" />
+            </View>
+            <Text style={styles.loggedInTitle}>Welcome Back</Text>
             <Text style={styles.loggedInEmail}>{sessionEmail}</Text>
             <TouchableOpacity style={styles.logoutButton} onPress={signOut} disabled={loading}>
               <LinearGradient colors={buttonGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.gradientButton}>
-                {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Sign Out 👋</Text>}
+                {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Sign Out</Text>}
               </LinearGradient>
             </TouchableOpacity>
           </View>
@@ -608,7 +603,9 @@ export default function AuthScreen() {
                   <Animated.View style={[styles.inputWrapper, { opacity: fadeAnim, transform: [{ translateX: slideAnim.interpolate({ inputRange: [0, 30], outputRange: [0, 20] }) }] }]}>
                     <Text style={styles.inputLabel}>EMAIL</Text>
                     <View style={styles.inputContainer}>
-                      <Text style={styles.inputIcon}>✉️</Text>
+                      <View style={styles.inputIcon}>
+                        <Mail size={18} color={C.textMuted} />
+                      </View>
                       <TextInput
                         placeholder="your@email.com"
                         placeholderTextColor={placeholderColor}
@@ -626,7 +623,9 @@ export default function AuthScreen() {
                   <Animated.View style={[styles.inputWrapper, { opacity: fadeAnim, transform: [{ translateX: slideAnim.interpolate({ inputRange: [0, 30], outputRange: [0, 10] }) }] }]}>
                     <Text style={styles.inputLabel}>PASSWORD</Text>
                     <View style={styles.inputContainer}>
-                      <Text style={styles.inputIcon}>🔒</Text>
+                      <View style={styles.inputIcon}>
+                        <LockKeyhole size={18} color={C.textMuted} />
+                      </View>
                       <TextInput
                         placeholder="••••••••"
                         placeholderTextColor={placeholderColor}
@@ -637,7 +636,7 @@ export default function AuthScreen() {
                         editable={!loading}
                       />
                       <TouchableOpacity onPress={togglePasswordVisibility} style={styles.eyeButton}>
-                        <Text style={styles.eyeButtonText}>{showPassword ? '🙈' : '🐵'}</Text>
+                        {showPassword ? <EyeOff size={20} color={C.textSecondary} /> : <Eye size={20} color={C.textSecondary} />}
                       </TouchableOpacity>
                     </View>
                   </Animated.View>
@@ -668,7 +667,7 @@ export default function AuthScreen() {
                   {/* Sign up */}
                   <Animated.View style={[styles.toggleContainer, { opacity: fadeAnim, transform: [{ translateY: slideAnim.interpolate({ inputRange: [0, 30], outputRange: [0, 10] }) }] }]}>
                     <TouchableOpacity onPress={navigateToSignUp} disabled={loading}>
-                      <Text style={styles.toggleButton}>Create an account 🎉</Text>
+                      <Text style={styles.toggleButton}>Create an account</Text>
                     </TouchableOpacity>
                   </Animated.View>
                 </View>
@@ -942,11 +941,10 @@ const createStyles = (C: typeof THEME_PALETTES.dark) => StyleSheet.create({
   inputWrapper: { marginBottom: 16 },
   inputLabel: { fontSize: 11, fontWeight: '600', color: C.textSecondary, letterSpacing: 1, marginBottom: 8 },
   inputContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.mode === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(24,24,38,0.04)', borderRadius: 14, borderWidth: 1, borderColor: C.mode === 'dark' ? 'rgba(255,255,255,0.12)' : 'rgba(24,24,38,0.08)', paddingHorizontal: 14, overflow: 'hidden' },
-  inputIcon: { fontSize: 15, marginRight: 10 },
+  inputIcon: { width: 22, marginRight: 10, alignItems: 'center' },
   input: { flex: 1, paddingVertical: 14, fontSize: 16, color: C.textPrimary },
   passwordInput: { paddingRight: 50 },
   eyeButton: { position: 'absolute', right: 12, padding: 8 },
-  eyeButtonText: { fontSize: 22 },
 
   // Forgot
   forgotPasswordContainer: { alignItems: 'flex-end', marginBottom: 16 },
@@ -969,8 +967,7 @@ const createStyles = (C: typeof THEME_PALETTES.dark) => StyleSheet.create({
 
   // Logged in
   loggedInContent: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
-  successIcon: { marginBottom: 24 },
-  successIconText: { fontSize: 100 },
+  successIcon: { marginBottom: 24, alignItems: 'center' },
   loggedInTitle: { fontSize: 32, fontWeight: '800', color: C.textPrimary, marginBottom: 8 },
   loggedInEmail: { fontSize: 18, color: C.textSecondary, marginBottom: 32, textAlign: 'center' },
   logoutButton: { width: '100%', maxWidth: 300, borderRadius: 16, overflow: 'hidden', elevation: 5 },

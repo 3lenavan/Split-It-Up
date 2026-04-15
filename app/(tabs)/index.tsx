@@ -7,7 +7,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { AppBackground } from "@/lib/app-background";
 import { THEME_PALETTES, useAppTheme } from "@/lib/app-theme";
 import { useIsFocused } from "@react-navigation/native";
-import { Edit2, House, Receipt, Trash2, TrendingUp, Users } from "lucide-react-native";
+import { ChevronDown, Edit2, House, Receipt, SlidersHorizontal, Trash2, TrendingUp, Users } from "lucide-react-native";
 import { useEffect, useRef, useState } from "react";
 import {
   Alert,
@@ -25,7 +25,6 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  TouchableWithoutFeedback,
   UIManager,
   View,
 } from "react-native";
@@ -50,11 +49,24 @@ type Split = {
 };
 type EditableMember = { id: string; full_name: string; username: string; shareAmount: number; shareAmountInput: string };
 type AvailableFriend = { id: string; full_name: string; username: string };
+type SplitFilter = "all" | "owe" | "owed" | "settled";
 type HomePalette = typeof THEME_PALETTES.dark;
 type HomeStyles = ReturnType<typeof createStyles>;
 
+const BALANCE_EPSILON = 0.005;
+const FILTER_OPTIONS: { id: SplitFilter; label: string; hint: string }[] = [
+  { id: "all", label: "All", hint: "Every split" },
+  { id: "owe", label: "I owe", hint: "Still to pay" },
+  { id: "owed", label: "Owed to me", hint: "Money back" },
+  { id: "settled", label: "Settled", hint: "All clear" },
+];
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const isUuid = (value?: string | null) => !!value && UUID_RE.test(value);
+const cleanNumberInput = (value: string) => value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1");
+const formatClampedNumber = (value: number) => {
+  const fixed = value.toFixed(2);
+  return fixed.replace(/\.0+$/, "").replace(/(\.\d*?)0+$/, "$1");
+};
 const splitDeleteAnimation = {
   duration: 280,
   create: {
@@ -121,7 +133,7 @@ function FloatingOrb({ style }: { style?: any }) {
   const scale = useRef(new Animated.Value(1)).current;
   const opacity = useRef(new Animated.Value(0.15)).current;
   useEffect(() => {
-    Animated.loop(Animated.sequence([
+    const loop = Animated.loop(Animated.sequence([
       Animated.parallel([
         Animated.timing(scale, { toValue: 1.2, duration: 3500, useNativeDriver: true }),
         Animated.timing(opacity, { toValue: 0.25, duration: 3500, useNativeDriver: true }),
@@ -130,8 +142,11 @@ function FloatingOrb({ style }: { style?: any }) {
         Animated.timing(scale, { toValue: 1, duration: 3500, useNativeDriver: true }),
         Animated.timing(opacity, { toValue: 0.15, duration: 3500, useNativeDriver: true }),
       ]),
-    ])).start();
-  }, []);
+    ]));
+
+    loop.start();
+    return () => loop.stop();
+  }, [opacity, scale]);
   return <Animated.View style={[style, { opacity, transform: [{ scale }] }]} pointerEvents="none" />;
 }
 
@@ -183,8 +198,8 @@ function SplitCard({ split, currentUserId, entryDelay, isFocused, onMenuOpen, on
       <Swipeable
         renderRightActions={renderRightActions}
         overshootRight={false}
-        activeOffsetX={[-18, 18]}
-        failOffsetY={[-10, 10]}
+        activeOffsetX={[-40, 40]}
+        failOffsetY={[-6, 6]}
         dragOffsetFromRightEdge={24}
       >
         <View style={styles.card}>
@@ -272,6 +287,8 @@ export default function HomeScreen() {
   const C = palette;
   const styles = createStyles(C);
   const [splits, setSplits] = useState<Split[]>([]);
+  const [activeFilter, setActiveFilter] = useState<SplitFilter>("all");
+  const [filterOpen, setFilterOpen] = useState(false);
   const isFocused = useIsFocused();
   const [loading, setLoading] = useState(true);
   const [selectedSplit, setSelectedSplit] = useState<Split | null>(null);
@@ -282,6 +299,7 @@ export default function HomeScreen() {
   const [editTotal, setEditTotal] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [editMembers, setEditMembers] = useState<EditableMember[]>([]);
+  const [editOriginalMemberIds, setEditOriginalMemberIds] = useState<string[]>([]);
   const [availableFriends, setAvailableFriends] = useState<AvailableFriend[]>([]);
   const [loadingEditData, setLoadingEditData] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -293,12 +311,23 @@ export default function HomeScreen() {
   const oweSummaryAnim = useFadeSlide(180, isFocused);
   const splitsSummaryAnim = useFadeSlide(220, isFocused);
   const contentAnim = useFadeSlide(260, isFocused);
+  const filterAnim = useFadeSlide(260, isFocused);
+  const filterReveal = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
       UIManager.setLayoutAnimationEnabledExperimental(true);
     }
   }, []);
+
+  useEffect(() => {
+    Animated.timing(filterReveal, {
+      toValue: filterOpen ? 1 : 0,
+      duration: filterOpen ? 260 : 210,
+      easing: filterOpen ? Easing.out(Easing.cubic) : Easing.in(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+  }, [filterOpen, filterReveal]);
 
   const loadSplits = async (showSpinner = true) => {
     if (showSpinner) setLoading(true);
@@ -409,8 +438,35 @@ export default function HomeScreen() {
   }, [currentUserId, isFocused]);
 
   // summary numbers
-  const totalOwed = splits.reduce((s, sp) => s + (sp.myBalance > 0 ? sp.myBalance : 0), 0);
-  const totalOwe = splits.reduce((s, sp) => s + (sp.myBalance < 0 ? Math.abs(sp.myBalance) : 0), 0);
+  const totalOwed = splits.reduce((s, sp) => s + (sp.myBalance > BALANCE_EPSILON ? sp.myBalance : 0), 0);
+  const totalOwe = splits.reduce((s, sp) => s + (sp.myBalance < -BALANCE_EPSILON ? Math.abs(sp.myBalance) : 0), 0);
+  const filterCounts: Record<SplitFilter, number> = {
+    all: splits.length,
+    owe: splits.filter((split) => split.myBalance < -BALANCE_EPSILON).length,
+    owed: splits.filter((split) => split.myBalance > BALANCE_EPSILON).length,
+    settled: splits.filter((split) => Math.abs(split.myBalance) <= BALANCE_EPSILON).length,
+  };
+  const filteredSplits = splits.filter((split) => {
+    if (activeFilter === "owe") return split.myBalance < -BALANCE_EPSILON;
+    if (activeFilter === "owed") return split.myBalance > BALANCE_EPSILON;
+    if (activeFilter === "settled") return Math.abs(split.myBalance) <= BALANCE_EPSILON;
+    return true;
+  });
+  const activeFilterOption = FILTER_OPTIONS.find((option) => option.id === activeFilter) ?? FILTER_OPTIONS[0];
+  const filterOptionsAnim = {
+    maxHeight: filterReveal.interpolate({ inputRange: [0, 1], outputRange: [0, 84] }),
+    marginTop: filterReveal.interpolate({ inputRange: [0, 1], outputRange: [0, 12] }),
+    opacity: filterReveal,
+    transform: [
+      { translateY: filterReveal.interpolate({ inputRange: [0, 1], outputRange: [-8, 0] }) },
+      { scale: filterReveal.interpolate({ inputRange: [0, 1], outputRange: [0.98, 1] }) },
+    ],
+  };
+  const filterChevronAnim = {
+    transform: [
+      { rotate: filterReveal.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "180deg"] }) },
+    ],
+  };
 
   const openActionMenu = (split: Split, position: { x: number; y: number }) => {
     setSelectedSplit(split); setMenuPosition(position); setActionMenuVisible(true);
@@ -426,6 +482,7 @@ export default function HomeScreen() {
     setEditTitle(selectedSplit.title);
     setEditTotal(String(selectedSplit.total_amount));
     setEditMembers([]); setAvailableFriends([]);
+    setEditOriginalMemberIds([]);
     setLoadingEditData(true); setActionMenuVisible(false); setEditModalVisible(true);
 
     try {
@@ -449,7 +506,9 @@ export default function HomeScreen() {
         .map((f: any) => { const fp = f.profiles as any; return { id: fp?.id ?? f.friend_id, full_name: fp?.full_name ?? "Unknown", username: fp?.username ?? "" }; })
         .filter((f) => !prefilledMembers.some((m) => m.id === f.id));
 
-      setEditMembers(prefilledMembers); setAvailableFriends(friends);
+      setEditMembers(prefilledMembers);
+      setEditOriginalMemberIds(prefilledMembers.map((member) => member.id));
+      setAvailableFriends(friends);
     } finally { setLoadingEditData(false); }
   };
 
@@ -458,6 +517,7 @@ export default function HomeScreen() {
     setEditTitle("");
     setEditTotal("");
     setEditMembers([]);
+    setEditOriginalMemberIds([]);
     setAvailableFriends([]);
   };
 
@@ -469,6 +529,7 @@ export default function HomeScreen() {
   const totalAmount = parseFloat(editTotal) || 0;
   const allocated = editMembers.reduce((sum, m) => sum + (parseFloat(m.shareAmountInput) || 0), 0);
   const creatorShare = Math.max(0, totalAmount - allocated);
+  const editOverAllocated = totalAmount > 0 && allocated - totalAmount > BALANCE_EPSILON;
 
   const saveSplitEdits = async () => {
     if (!selectedSplit || !currentUserId) return;
@@ -477,10 +538,30 @@ export default function HomeScreen() {
     if (selectedSplit.creator_id !== user.id) { Alert.alert("Can't edit", "Only the creator can edit this split."); return; }
     const parsedTotal = Number(editTotal);
     if (!editTitle.trim() || Number.isNaN(parsedTotal) || parsedTotal <= 0) { Alert.alert("Invalid input", "Please enter a valid name and amount."); return; }
+    if (allocated - parsedTotal > BALANCE_EPSILON) {
+      Alert.alert("Too Much Assigned", "Member shares are more than the total bill. Lower one of the amounts first.");
+      return;
+    }
     setIsSaving(true);
     try {
       const { error } = await supabase.from("splits").update({ title: editTitle.trim(), total_amount: parsedTotal }).eq("id", selectedSplit.id);
       if (error) { Alert.alert("Error", "Could not save changes. Please try again."); return; }
+      const savedMemberIds = new Set(editMembers.map((member) => member.id));
+      const removedMemberIds = editOriginalMemberIds.filter((memberId) => !savedMemberIds.has(memberId));
+
+      if (removedMemberIds.length > 0) {
+        const { error: deleteMemberError } = await supabase
+          .from("split_members")
+          .delete()
+          .eq("split_id", selectedSplit.id)
+          .in("profile_id", removedMemberIds);
+
+        if (deleteMemberError) {
+          Alert.alert("Error", "Could not remove old members from this split.");
+          return;
+        }
+      }
+
       const memberRows = [
         { split_id: selectedSplit.id, profile_id: currentUserId, share_percentage: parsedTotal > 0 ? (creatorShare / parsedTotal) * 100 : 0, share_amount: creatorShare },
         ...editMembers.map((m) => {
@@ -495,7 +576,7 @@ export default function HomeScreen() {
         }),
       ];
       const { error: memberError } = await supabase.from("split_members").upsert(memberRows, { onConflict: "split_id,profile_id" });
-      if (memberError) Alert.alert("Partial save", "Split details saved but members could not be updated.");
+      if (memberError) { Alert.alert("Error", "Split members could not be saved."); return; }
       await loadSplits(); closeEditModal(); setSelectedSplit(null);
     } finally { setIsSaving(false); }
   };
@@ -512,7 +593,24 @@ export default function HomeScreen() {
   };
 
   const updateMemberShare = (memberId: string, value: string) => {
-    setEditMembers((prev) => prev.map((m) => m.id === memberId ? { ...m, shareAmountInput: value, shareAmount: parseFloat(value) || 0 } : m));
+    const cleaned = cleanNumberInput(value);
+
+    setEditMembers((prev) => {
+      if (cleaned === "" || cleaned === ".") {
+        return prev.map((m) => m.id === memberId ? { ...m, shareAmountInput: cleaned, shareAmount: 0 } : m);
+      }
+
+      const usedByOthers = prev.reduce((sum, member) => {
+        if (member.id === memberId) return sum;
+        return sum + (parseFloat(member.shareAmountInput) || 0);
+      }, 0);
+      const requestedAmount = parseFloat(cleaned) || 0;
+      const maxAmount = totalAmount > 0 ? Math.max(0, totalAmount - usedByOthers) : requestedAmount;
+      const nextAmount = Math.min(requestedAmount, maxAmount);
+      const nextInput = requestedAmount > maxAmount ? formatClampedNumber(nextAmount) : cleaned;
+
+      return prev.map((m) => m.id === memberId ? { ...m, shareAmountInput: nextInput, shareAmount: nextAmount } : m);
+    });
   };
 
   const deleteSplit = async (splitToDelete?: Split) => {
@@ -635,7 +733,6 @@ export default function HomeScreen() {
   };
 
   return (
-    <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
     <SafeAreaView style={styles.safe}>
       <AppBackground />
       {backgroundMode === "default" ? (
@@ -648,6 +745,7 @@ export default function HomeScreen() {
       <ScrollView
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
+        onScrollBeginDrag={Keyboard.dismiss}
         keyboardShouldPersistTaps="never"
         keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
         refreshControl={
@@ -695,6 +793,50 @@ export default function HomeScreen() {
           </Animated.View>
         </View>
 
+        {/* ── FILTERS ── */}
+        <Animated.View style={[styles.filterPanel, filterAnim]}>
+          <Pressable style={styles.filterButton} onPress={() => setFilterOpen((open) => !open)}>
+            <View style={styles.filterTitleRow}>
+              <View style={styles.filterIconWrap}>
+                <SlidersHorizontal size={15} color={C.accentBright} />
+              </View>
+              <View>
+                <Text style={styles.filterEyebrow}>Filter</Text>
+                <Text style={styles.filterTitle}>Show: {activeFilterOption.label}</Text>
+              </View>
+            </View>
+            <View style={styles.filterButtonRight}>
+              <Text style={styles.filterCount}>{filteredSplits.length}/{splits.length}</Text>
+              <Animated.View style={[styles.filterChevron, filterChevronAnim]}>
+                <ChevronDown size={16} color={C.accentBright} />
+              </Animated.View>
+            </View>
+          </Pressable>
+
+          <Animated.View style={[styles.filterOptionsWrap, filterOptionsAnim]} pointerEvents={filterOpen ? "auto" : "none"}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterPills}>
+              {FILTER_OPTIONS.map((option) => {
+                const isActive = activeFilter === option.id;
+                return (
+                  <Pressable
+                    key={option.id}
+                    style={[styles.filterPill, isActive && styles.filterPillActive]}
+                    onPress={() => {
+                      setActiveFilter(option.id);
+                      setFilterOpen(false);
+                    }}
+                  >
+                    <Text style={[styles.filterPillLabel, isActive && styles.filterPillLabelActive]}>{option.label}</Text>
+                    <Text style={[styles.filterPillMeta, isActive && styles.filterPillMetaActive]}>
+                      {filterCounts[option.id]} - {option.hint}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </Animated.View>
+        </Animated.View>
+
         {/* ── SPLITS LIST ── */}
         {loading && (
           <Animated.View style={[styles.loadingState, contentAnim]}>
@@ -712,10 +854,22 @@ export default function HomeScreen() {
           </Animated.View>
         )}
 
+        {!loading && splits.length > 0 && filteredSplits.length === 0 && (
+          <Animated.View style={[styles.emptyState, contentAnim]}>
+            <View style={styles.emptyIcon}>
+              <SlidersHorizontal size={28} color={C.textMuted} />
+            </View>
+            <Text style={styles.emptyTitle}>Nothing here yet</Text>
+            <Text style={styles.emptySubtitle}>
+              No splits match {activeFilterOption.label}. Try All to see everything.
+            </Text>
+          </Animated.View>
+        )}
+
         <View>
-          {splits.map((split, index) => (
+          {filteredSplits.map((split, index) => (
             <SplitCard
-              key={split.id}
+              key={`${activeFilter}-${split.id}`}
               split={split}
               currentUserId={currentUserId}
               entryDelay={280 + Math.min(index, 6) * 45}
@@ -778,7 +932,7 @@ export default function HomeScreen() {
                 <TextInput
                   style={[styles.modalInput, { flex: 1, borderWidth: 0 }]}
                   value={editTotal}
-                  onChangeText={setEditTotal}
+                  onChangeText={(value) => setEditTotal(cleanNumberInput(value))}
                   placeholder="0.00"
                   placeholderTextColor={C.textMuted}
                   keyboardType="numeric"
@@ -788,7 +942,7 @@ export default function HomeScreen() {
               {totalAmount > 0 && (
                 <View style={styles.allocationRow}>
                   <Text style={styles.allocationText}>Your share: <Text style={{ color: C.accentBright }}>${creatorShare.toFixed(2)}</Text></Text>
-                  <Text style={styles.allocationText}>Allocated: <Text style={{ color: C.green }}>${allocated.toFixed(2)}</Text> / ${totalAmount.toFixed(2)}</Text>
+                  <Text style={styles.allocationText}>Allocated: <Text style={{ color: editOverAllocated ? C.red : C.green }}>${allocated.toFixed(2)}</Text> / ${totalAmount.toFixed(2)}</Text>
                 </View>
               )}
 
@@ -861,7 +1015,6 @@ export default function HomeScreen() {
         </Pressable>
       </Modal>
     </SafeAreaView>
-    </TouchableWithoutFeedback>
   );
 }
 
@@ -887,6 +1040,32 @@ return StyleSheet.create({
   summaryCard: { flex: 1, backgroundColor: C.card, borderRadius: 18, padding: 12, alignItems: "center", borderWidth: 1, gap: 4 },
   summaryLabel: { fontSize: 9, color: C.textSecondary, fontWeight: "600", textTransform: "uppercase", letterSpacing: 0.6, textAlign: "center" },
   summaryValue: { fontSize: 16, fontWeight: "800" },
+  filterPanel: {
+    backgroundColor: C.card,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: C.border,
+    padding: 12,
+    marginBottom: 18,
+    overflow: "hidden",
+  },
+  filterButton: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+  filterButtonRight: { flexDirection: "row", alignItems: "center", gap: 8 },
+  filterChevron: { width: 30, height: 30, borderRadius: 10, backgroundColor: C.accentDim, borderWidth: 1, borderColor: C.accent + "33", alignItems: "center", justifyContent: "center" },
+  filterTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 12 },
+  filterTitleRow: { flexDirection: "row", alignItems: "center", gap: 10, flex: 1 },
+  filterIconWrap: { width: 34, height: 34, borderRadius: 10, backgroundColor: C.accentDim, borderWidth: 1, borderColor: C.accent + "44", alignItems: "center", justifyContent: "center" },
+  filterEyebrow: { fontSize: 10, color: C.textSecondary, fontWeight: "700", textTransform: "uppercase", letterSpacing: 1 },
+  filterTitle: { fontSize: 15, color: C.textPrimary, fontWeight: "800", marginTop: 1 },
+  filterCount: { color: C.accentBright, fontSize: 12, fontWeight: "800", backgroundColor: C.accentDim, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6, overflow: "hidden" },
+  filterOptionsWrap: { overflow: "hidden" },
+  filterPills: { gap: 8, paddingRight: 4 },
+  filterPill: { minWidth: 112, backgroundColor: C.surface, borderRadius: 14, borderWidth: 1, borderColor: C.border, paddingHorizontal: 12, paddingVertical: 10 },
+  filterPillActive: { backgroundColor: C.accent, borderColor: C.accentBright },
+  filterPillLabel: { color: C.textPrimary, fontSize: 13, fontWeight: "800" },
+  filterPillLabelActive: { color: "#fff" },
+  filterPillMeta: { color: C.textMuted, fontSize: 10, fontWeight: "700", marginTop: 3 },
+  filterPillMetaActive: { color: "rgba(255,255,255,0.82)" },
 
   // split card
   card: {

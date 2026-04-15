@@ -1,6 +1,7 @@
 import * as ImagePicker from 'expo-image-picker'
 import { LinearGradient } from 'expo-linear-gradient'
 import { useRouter } from 'expo-router'
+import { Camera, Eye, EyeOff, LockKeyhole, Mail } from 'lucide-react-native'
 import { useEffect, useRef, useState } from 'react'
 import {
   ActivityIndicator,
@@ -93,7 +94,6 @@ export default function SignUpScreen() {
   const [confirmPassword, setConfirmPassword] = useState('')
   const [pronouns, setPronouns] = useState('')
   const [customPronouns, setCustomPronouns] = useState('')
-  const [bio, setBio] = useState('')
   const [profileImage, setProfileImage] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
@@ -227,10 +227,11 @@ export default function SignUpScreen() {
       const cleanFullName = fullName.trim()
       const cleanUsername = username.trim().toLowerCase()
       const cleanEmail = email.trim().toLowerCase()
+      const cleanPronouns = (customPronouns || pronouns).trim()
       const { data, error } = await supabase.auth.signUp({
         email: cleanEmail,
         password,
-        options: { data: { full_name: cleanFullName, username: cleanUsername } },
+        options: { data: { full_name: cleanFullName, username: cleanUsername, pronouns: cleanPronouns } },
       })
 
       if (error || !data.user) {
@@ -244,28 +245,38 @@ export default function SignUpScreen() {
       if (profileImage) {
         try {
           avatarUrl = await uploadProfileImage(data.user.id, profileImage)
-          const { error: profileError } = await supabase
-            .from('profiles')
-            .upsert({
-              id: data.user.id,
-              full_name: cleanFullName,
-              username: cleanUsername,
-              email: cleanEmail,
-              avatar_url: avatarUrl,
-            })
-
-          if (profileError) throw profileError
-
-          const { error: authError } = await supabase.auth.updateUser({
-            data: { full_name: cleanFullName, username: cleanUsername, avatar_url: avatarUrl },
-          })
-
-          if (authError) throw authError
         } catch (avatarError) {
           console.error('Profile image upload failed:', avatarError)
           avatarUploadError = avatarError
         }
       }
+
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .upsert({
+          id: data.user.id,
+          full_name: cleanFullName,
+          username: cleanUsername,
+          email: cleanEmail,
+          avatar_url: avatarUrl,
+          pronouns: cleanPronouns,
+        })
+
+      if (profileError) throw profileError
+
+      const userMetadata: Record<string, string> = {
+        full_name: cleanFullName,
+        username: cleanUsername,
+        pronouns: cleanPronouns,
+      }
+
+      if (avatarUrl) userMetadata.avatar_url = avatarUrl
+
+      const { error: authError } = await supabase.auth.updateUser({
+        data: userMetadata,
+      })
+
+      if (authError) throw authError
 
       setLoading(false)
       if (avatarUploadError) {
@@ -361,7 +372,7 @@ export default function SignUpScreen() {
                           <Image source={{ uri: profileImage }} style={styles.profileImage} />
                         ) : (
                           <View style={styles.profileImagePlaceholder}>
-                            <Text style={styles.profileImagePlaceholderText}>📷</Text>
+                            <Camera size={30} color={C.textSecondary} style={styles.profileImagePlaceholderIcon} />
                             <Text style={styles.profileImagePlaceholderSubtext}>Tap to add photo</Text>
                           </View>
                         )}
@@ -383,6 +394,11 @@ export default function SignUpScreen() {
                           {field.label} {field.required ? <Text style={styles.requiredStar}>*</Text> : null}
                         </Text>
                         <View style={styles.inputContainer}>
+                          {field.label === 'Email' ? (
+                            <View style={styles.inputIcon}>
+                              <Mail size={18} color={C.textMuted} />
+                            </View>
+                          ) : null}
                           {field.prefix ? <Text style={styles.inputPrefix}>{field.prefix}</Text> : null}
                           <TextInput
                             placeholder={field.placeholder}
@@ -400,7 +416,7 @@ export default function SignUpScreen() {
                   </View>
 
                   <View style={styles.sectionShell}>
-                    <SectionHeader eyebrow="Identity" title="A little more about you" subtitle="Round out your profile with pronouns and a short bio." hint="Optional style" />
+                    <SectionHeader eyebrow="Identity" title="Choose your pronouns" subtitle="Pick how your profile should refer to you." hint="Required" />
                     <Animated.View style={[styles.inputWrapper, { opacity: fadeAnim, transform: [{ translateX: slideAnim.interpolate({ inputRange: [0, 42], outputRange: [0, 32] }) }] }]}>
                       <Text style={styles.inputLabel}>Pronouns <Text style={styles.requiredStar}>*</Text></Text>
                       <TouchableOpacity style={styles.inputContainer} onPress={() => setPronounModalVisible(true)}>
@@ -426,23 +442,6 @@ export default function SignUpScreen() {
                         </View>
                       </Animated.View>
                     ) : null}
-
-                    <Animated.View style={[styles.inputWrapper, { opacity: fadeAnim, transform: [{ translateX: slideAnim.interpolate({ inputRange: [0, 42], outputRange: [0, 48] }) }] }]}>
-                      <Text style={styles.inputLabel}>Bio <Text style={styles.optionalText}>(optional)</Text></Text>
-                      <View style={styles.inputContainer}>
-                        <TextInput
-                          placeholder="Tell us a little about yourself..."
-                          placeholderTextColor={placeholderColor}
-                          value={bio}
-                          onChangeText={setBio}
-                          style={[styles.input, styles.textArea]}
-                          multiline
-                          numberOfLines={3}
-                          textAlignVertical="top"
-                          editable={!loading}
-                        />
-                      </View>
-                    </Animated.View>
                   </View>
 
                   <View style={styles.sectionShell}>
@@ -457,6 +456,9 @@ export default function SignUpScreen() {
                       >
                         <Text style={styles.inputLabel}>{field.label} <Text style={styles.requiredStar}>*</Text></Text>
                         <View style={styles.inputContainer}>
+                          <View style={styles.inputIcon}>
+                            <LockKeyhole size={18} color={C.textMuted} />
+                          </View>
                           <TextInput
                             placeholder="••••••••"
                             placeholderTextColor={placeholderColor}
@@ -467,7 +469,7 @@ export default function SignUpScreen() {
                             editable={!loading}
                           />
                           <TouchableOpacity onPress={() => field.toggle(!field.show)} style={styles.eyeButton}>
-                            <Text style={styles.eyeButtonText}>{field.show ? '🙈' : '🐵'}</Text>
+                            {field.show ? <EyeOff size={20} color={C.textSecondary} /> : <Eye size={20} color={C.textSecondary} />}
                           </TouchableOpacity>
                         </View>
                       </Animated.View>
@@ -581,17 +583,15 @@ return StyleSheet.create({
   profileInputWrapper: { marginBottom: 0, alignItems: 'center' },
   inputLabel: { fontSize: 11, fontWeight: '600', color: C.textSecondary, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.8 },
   requiredStar: { color: '#FF6B8A', fontSize: 13 },
-  optionalText: { color: C.textMuted, fontSize: 11, fontWeight: '400', textTransform: 'none' },
   inputContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.mode === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(24,24,38,0.04)', borderRadius: 16, borderWidth: 1, borderColor: C.mode === 'dark' ? 'rgba(255,255,255,0.12)' : 'rgba(24,24,38,0.08)', overflow: 'hidden' },
+  inputIcon: { width: 22, marginLeft: 14, marginRight: -2, alignItems: 'center' },
   inputPrefix: { fontSize: 16, color: C.textSecondary, paddingLeft: 16 },
   input: { flex: 1, padding: 14, fontSize: 16, color: C.textPrimary },
   inputWithPrefix: { paddingLeft: 6 },
   placeholderText: { color: C.textMuted },
   dropdownIcon: { fontSize: 20, color: C.textMuted, paddingRight: 14 },
-  textArea: { minHeight: 80, paddingTop: 14 },
   passwordInput: { paddingRight: 50 },
   eyeButton: { position: 'absolute', right: 12, padding: 8 },
-  eyeButtonText: { fontSize: 22 },
   requirementsContainer: { marginTop: 8, marginBottom: 0, padding: 16, backgroundColor: C.mode === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(24,24,38,0.03)', borderRadius: 16, borderWidth: 1, borderColor: C.mode === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(24,24,38,0.06)' },
   requirementsTitle: { fontSize: 13, fontWeight: '600', color: C.textSecondary, marginBottom: 12 },
   requirementRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
@@ -609,7 +609,7 @@ return StyleSheet.create({
   profileImageContainer: { alignItems: 'center', justifyContent: 'center' },
   profileImage: { width: 108, height: 108, borderRadius: 54, borderWidth: 2, borderColor: 'rgba(145,234,228,0.45)' },
   profileImagePlaceholder: { width: 108, height: 108, borderRadius: 54, backgroundColor: C.mode === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(24,24,38,0.04)', borderWidth: 2, borderColor: 'rgba(145,234,228,0.3)', borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center' },
-  profileImagePlaceholderText: { fontSize: 30, marginBottom: 4 },
+  profileImagePlaceholderIcon: { marginBottom: 6 },
   profileImagePlaceholderSubtext: { fontSize: 10, color: C.textSecondary, textAlign: 'center' },
   modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: C.mode === 'dark' ? 'rgba(0,0,0,0.6)' : 'rgba(24,24,38,0.22)' },
   modalContent: { backgroundColor: C.cardBright, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 20, maxHeight: '55%', borderTopWidth: 1, borderColor: C.mode === 'dark' ? 'rgba(255,255,255,0.12)' : 'rgba(24,24,38,0.08)' },

@@ -4,9 +4,9 @@ import { AvatarDecoration } from "@/lib/avatar-decoration";
 import { supabase } from "@/lib/supabaseClient";
 import { useIsFocused } from "@react-navigation/native";
 import { router } from "expo-router";
-import { Check, ChevronDown, ChevronUp, Search, Settings2, UserPlus, UserRound, X } from "lucide-react-native";
+import { Check, ChevronDown, ChevronUp, Search, Settings2, UserMinus, UserPlus, UserRound, X } from "lucide-react-native";
 import { useEffect, useRef, useState } from "react";
-import { Animated, Easing, Image, Keyboard, LayoutAnimation, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableWithoutFeedback, UIManager, View } from "react-native";
+import { Alert, Animated, Easing, Image, Keyboard, LayoutAnimation, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, UIManager, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 function useFadeSlide(delay = 0, isActive = true) {
@@ -58,7 +58,7 @@ function FloatingOrb({ style }: { style?: any }) {
   const scale = useRef(new Animated.Value(1)).current;
   const opacity = useRef(new Animated.Value(0.18)).current;
   useEffect(() => {
-    Animated.loop(
+    const loop = Animated.loop(
       Animated.sequence([
         Animated.parallel([
           Animated.timing(scale, { toValue: 1.18, duration: 3200, useNativeDriver: true }),
@@ -69,7 +69,10 @@ function FloatingOrb({ style }: { style?: any }) {
           Animated.timing(opacity, { toValue: 0.18, duration: 3200, useNativeDriver: true }),
         ]),
       ])
-    ).start();
+    );
+
+    loop.start();
+    return () => loop.stop();
   }, [opacity, scale]);
   return <Animated.View pointerEvents="none" style={[style, { opacity, transform: [{ scale }] }]} />;
 }
@@ -152,26 +155,20 @@ export default function ProfileScreen() {
   const scrollRef = useRef<ScrollView>(null);
   const friendsSectionY = useRef(0);
   const [searchText, setSearchText] = useState("");
-  const [profile, setProfile] = useState({ name: "", username: "", email: "", avatarUrl: "", avatarDecoration: "none" });
+  const [profile, setProfile] = useState({ name: "", username: "", email: "", avatarUrl: "", avatarDecoration: "none", pronouns: "" });
   const [friends, setFriends] = useState<any[]>([]);
   const [sentRequests, setSentRequests] = useState<string[]>([]);
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [youreOwed, setYoureOwed] = useState(0);
   const [youOwe, setYouOwe] = useState(0);
   const [friendsExpanded, setFriendsExpanded] = useState(true);
+  const [removingFriendId, setRemovingFriendId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
   const headerAnim = useFadeSlide(60, isFocused);
   const heroAnim = useFadeSlide(140, isFocused);
   const searchAnim = useFadeSlide(210, isFocused);
   const friendsAnim = useFadeSlide(280, isFocused);
-  const logoutAnim = useFadeSlide(400, isFocused);
-  const logoutScale = useRef(new Animated.Value(1)).current;
-  const farewellOpacity = useRef(new Animated.Value(0)).current;
-  const farewellScale = useRef(new Animated.Value(0.94)).current;
-  const farewellSlide = useRef(new Animated.Value(20)).current;
-  const farewellGlow = useRef(new Animated.Value(1)).current;
-  const farewellProgress = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -194,6 +191,7 @@ export default function ProfileScreen() {
         email: data.email || user.email || "",
         avatarUrl: data.avatar_url || metadata.avatar_url || "",
         avatarDecoration: data.avatar_decoration || metadata.avatar_decoration || "none",
+        pronouns: data.pronouns || metadata.pronouns || "",
       });
     }
   };
@@ -337,6 +335,68 @@ export default function ProfileScreen() {
     setSearchResults((prev) => prev.map((user) => user.id === addresseeId ? { ...user, isPending: true } : user));
   };
 
+  const removeFriend = async (friend: any) => {
+    const friendId = friend?.id;
+    if (!friendId) return;
+
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError) {
+      console.error("Session error:", sessionError);
+      Alert.alert("Could not remove friend", "Please try again in a moment.");
+      return;
+    }
+
+    const currentUserId = session?.user?.id;
+    if (!currentUserId) return;
+
+    setRemovingFriendId(friendId);
+
+    const { error: myFriendRowError } = await supabase
+      .from("friends")
+      .delete()
+      .eq("user_id", currentUserId)
+      .eq("friend_id", friendId);
+
+    const { error: theirFriendRowError } = await supabase
+      .from("friends")
+      .delete()
+      .eq("user_id", friendId)
+      .eq("friend_id", currentUserId);
+
+    const { error: requestCleanupError } = await supabase
+      .from("friend_requests")
+      .delete()
+      .or(`and(requester_id.eq.${currentUserId},addressee_id.eq.${friendId}),and(requester_id.eq.${friendId},addressee_id.eq.${currentUserId})`);
+
+    setRemovingFriendId(null);
+
+    if (myFriendRowError || theirFriendRowError) {
+      console.error("Error removing friendship:", myFriendRowError || theirFriendRowError);
+      Alert.alert("Could not remove friend", "The friendship could not be removed. Please try again.");
+      return;
+    }
+
+    if (requestCleanupError) {
+      console.log("Friend removed, but old request cleanup failed:", requestCleanupError);
+    }
+
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setFriends((prev) => prev.filter((item) => item.id !== friendId));
+    setSearchResults((prev) => prev.map((user) => user.id === friendId ? { ...user, isFriend: false, isPending: false } : user));
+    await Promise.all([loadFriends(), loadSentRequests()]);
+  };
+
+  const confirmRemoveFriend = (friend: any) => {
+    Alert.alert(
+      "Remove friend?",
+      `Remove ${friend.name || `@${friend.username}` || "this friend"} from your friends list?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Remove", style: "destructive", onPress: () => removeFriend(friend) },
+      ]
+    );
+  };
+
   const scrollToFriendsSection = () => {
     if (!friendsExpanded) {
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -382,7 +442,6 @@ export default function ProfileScreen() {
   const profileInitial = profile.name ? profile.name.charAt(0).toUpperCase() : "?";
 
   return (
-    <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
     <SafeAreaView edges={["top", "left", "right"]} style={styles.safeArea}>
       <AppBackground />
       {backgroundMode === "default" ? (
@@ -395,6 +454,7 @@ export default function ProfileScreen() {
         ref={scrollRef}
         contentContainerStyle={styles.container}
         showsVerticalScrollIndicator={false}
+        onScrollBeginDrag={Keyboard.dismiss}
         keyboardShouldPersistTaps="never"
         keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
         refreshControl={
@@ -442,7 +502,12 @@ export default function ProfileScreen() {
             </View>
             <View style={styles.profileInfo}>
               <Text style={styles.name}>{profile.name || " "}</Text>
-              <Text style={styles.username}>@{profile.username || ""}</Text>
+              <View style={styles.profileMetaRow}>
+                <Text style={styles.username}>@{profile.username || ""}</Text>
+                {profile.pronouns ? (
+                  <Text style={styles.pronounsInline}>{profile.pronouns}</Text>
+                ) : null}
+              </View>
               <Text style={styles.email}>{profile.email || " "}</Text>
             </View>
           </View>
@@ -547,14 +612,26 @@ export default function ProfileScreen() {
                 <View key={friend.id} style={styles.friendCard}>
                   <View style={styles.friendInfo}>
                     <View style={styles.friendAvatar}><Text style={styles.friendAvatarText}>{friend.name ? friend.name.charAt(0).toUpperCase() : "?"}</Text></View>
-                    <View>
-                      <Text style={styles.resultName}>{friend.name}</Text>
-                      <Text style={styles.resultUsername}>@{friend.username}</Text>
+                    <View style={styles.friendTextBlock}>
+                      <Text style={styles.resultName} numberOfLines={1}>{friend.name}</Text>
+                      <Text style={styles.resultUsername} numberOfLines={1}>@{friend.username}</Text>
                     </View>
                   </View>
-                  <View style={styles.friendStatus}>
-                    <Check size={15} color={C.green} />
-                    <Text style={styles.friendStatusText}>Friends</Text>
+                  <View style={styles.friendActions}>
+                    <View style={styles.friendStatus}>
+                      <Check size={15} color={C.green} />
+                      <Text style={styles.friendStatusText}>Friends</Text>
+                    </View>
+                    <Pressable
+                      style={[styles.removeFriendButton, removingFriendId === friend.id && styles.removeFriendButtonDisabled]}
+                      onPress={() => confirmRemoveFriend(friend)}
+                      disabled={removingFriendId === friend.id}
+                    >
+                      <UserMinus size={14} color={C.red} />
+                      <Text style={styles.removeFriendText}>
+                        {removingFriendId === friend.id ? "Removing" : "Remove"}
+                      </Text>
+                    </Pressable>
                   </View>
                 </View>
               ))}
@@ -569,7 +646,6 @@ export default function ProfileScreen() {
         </Animated.View>
       </ScrollView>
     </SafeAreaView>
-    </TouchableWithoutFeedback>
   );
 }
 
@@ -596,7 +672,9 @@ const createStyles = (C: ReturnType<typeof useAppTheme>["palette"]) => StyleShee
   avatarText: { color: "#fff", fontSize: 28, fontWeight: "800" },
   profileInfo: { flex: 1 },
   name: { fontSize: 23, fontWeight: "800", color: C.textPrimary, letterSpacing: -0.5 },
-  username: { fontSize: 14, color: C.accentBright, fontWeight: "600", marginTop: 4 },
+  profileMetaRow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 7, marginTop: 4 },
+  username: { fontSize: 14, color: C.accentBright, fontWeight: "600" },
+  pronounsInline: { fontSize: 14, color: C.textSecondary, fontWeight: "600" },
   email: { fontSize: 13, color: C.textSecondary, marginTop: 4 },
   statsRow: { flexDirection: "row", gap: 10 },
   metricSlot: { flex: 1 },
@@ -663,7 +741,7 @@ const createStyles = (C: ReturnType<typeof useAppTheme>["palette"]) => StyleShee
   acceptButton: { flex: 1, alignItems: "center", backgroundColor: C.green, borderRadius: 12, paddingVertical: 10 },
   declineButton: { flex: 1, alignItems: "center", backgroundColor: C.red, borderRadius: 12, paddingVertical: 10 },
   requestButtonText: { color: "#fff", fontSize: 12, fontWeight: "800" },
-  friendCard: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: C.surface, borderRadius: 16, borderWidth: 1, borderColor: C.border, padding: 12, marginBottom: 10 },
+  friendCard: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: C.surface, borderRadius: 16, borderWidth: 1, borderColor: C.border, padding: 12, marginBottom: 10, gap: 10 },
   friendsSectionTop: { marginBottom: 6 },
   collapseToggle: {
     alignSelf: "flex-start",
@@ -686,11 +764,16 @@ const createStyles = (C: ReturnType<typeof useAppTheme>["palette"]) => StyleShee
   friendsAnimatedWrap: {
     paddingTop: 2,
   },
-  friendInfo: { flexDirection: "row", alignItems: "center" },
+  friendInfo: { flexDirection: "row", alignItems: "center", flex: 1, minWidth: 0 },
   friendAvatar: { width: 42, height: 42, borderRadius: 21, backgroundColor: C.accentDim, borderWidth: 1, borderColor: `${C.accent}55`, justifyContent: "center", alignItems: "center", marginRight: 12 },
   friendAvatarText: { color: C.accentBright, fontSize: 15, fontWeight: "700" },
+  friendTextBlock: { flex: 1, minWidth: 0 },
+  friendActions: { alignItems: "flex-end", gap: 7 },
   friendStatus: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: C.greenDim, borderRadius: 999, borderWidth: 1, borderColor: `${C.green}33`, paddingHorizontal: 10, paddingVertical: 6 },
   friendStatusText: { color: C.green, fontSize: 11, fontWeight: "800" },
+  removeFriendButton: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: C.redDim, borderRadius: 999, borderWidth: 1, borderColor: `${C.red}33`, paddingHorizontal: 10, paddingVertical: 7 },
+  removeFriendButtonDisabled: { opacity: 0.55 },
+  removeFriendText: { color: C.red, fontSize: 11, fontWeight: "800" },
   emptyState: { backgroundColor: C.surface, borderRadius: 16, borderWidth: 1, borderColor: C.border, paddingVertical: 22, paddingHorizontal: 16, alignItems: "center" },
   emptyTitle: { fontSize: 14, fontWeight: "700", color: C.textPrimary, textAlign: "center" },
   emptySubtitle: { fontSize: 12, color: C.textSecondary, textAlign: "center", marginTop: 6, lineHeight: 18 },

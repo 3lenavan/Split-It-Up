@@ -1,3 +1,4 @@
+import { LinearGradient } from "expo-linear-gradient";
 import { useEffect, useRef } from "react";
 import { Animated, Easing, StyleSheet, Text, View } from "react-native";
 
@@ -11,7 +12,8 @@ export type AvatarDecorationId =
   | "floaties"
   | "flame"
   | "kitty"
-  | "sparkle";
+  | "sparkle"
+  | "rainbow";
 
 export type AvatarDecorationOption = {
   id: AvatarDecorationId;
@@ -30,6 +32,7 @@ export const AVATAR_DECORATIONS: AvatarDecorationOption[] = [
   { id: "flame", name: "Tiny Flame", colors: ["#fb7185", "#f97316"] },
   { id: "kitty", name: "Kitty", colors: ["#f9a8d4", "#f0abfc"] },
   { id: "sparkle", name: "Sparkle Pop", colors: ["#fde68a", "#93c5fd"] },
+  { id: "rainbow", name: "Rainbow Cloud", colors: ["#fb7185", "#67e8f9"] },
 ];
 
 export const getAvatarDecoration = (value?: string | null): AvatarDecorationOption => {
@@ -286,6 +289,52 @@ export function AvatarDecoration({
     );
   }
 
+  if (decoration.id === "rainbow") {
+    const rainbowColors: [string, string, string, string, string, string] = ["#fb7185", "#fdba74", "#fde68a", "#86efac", "#67e8f9", "#a78bfa"];
+
+    return (
+      <View pointerEvents="none" style={[styles.wrap, { width: size, height: size }]}>
+        <Animated.View style={[styles.rainbowHalo, { opacity: twinkleOpacity, transform: [{ scale: pulseScale }] }]} />
+        <Animated.View
+          style={[
+            styles.rainbowBandWrap,
+            {
+              width: size * 1.22,
+              height: size * 0.28,
+              top: size * 0.1,
+              left: -size * 0.1,
+              transform: [{ translateY: softBob }, { rotate: "-23deg" }],
+            },
+          ]}
+        >
+          <LinearGradient
+            colors={rainbowColors}
+            start={{ x: 0, y: 0.5 }}
+            end={{ x: 1, y: 0.5 }}
+            style={styles.rainbowBand}
+          />
+          <View style={styles.rainbowShine} />
+        </Animated.View>
+
+        <Animated.View style={[styles.cloud, styles.cloudLeft, { transform: [{ translateY: softBob }, { scale: pulseScale }] }]}>
+          <View style={[styles.cloudPuff, styles.cloudPuffLarge]} />
+          <View style={[styles.cloudPuff, styles.cloudPuffMid]} />
+          <View style={[styles.cloudPuff, styles.cloudPuffSmall]} />
+        </Animated.View>
+
+        <Animated.View style={[styles.cloud, styles.cloudRight, { transform: [{ translateY: softBob }, { scale: twinkleScale }] }]}>
+          <View style={[styles.cloudPuff, styles.cloudPuffLarge]} />
+          <View style={[styles.cloudPuff, styles.cloudPuffMid]} />
+          <View style={[styles.cloudPuff, styles.cloudPuffSmall]} />
+        </Animated.View>
+
+        <Animated.View style={[styles.rainbowDust, styles.rainbowDustTop, { opacity: twinkleOpacity, transform: [{ scale: twinkleScale }] }]} />
+        <Animated.View style={[styles.rainbowDust, styles.rainbowDustLeft, { opacity: flickerOpacity, transform: [{ scale: pulseScale }] }]} />
+        <Animated.View style={[styles.rainbowDust, styles.rainbowDustRight, { opacity: twinkleOpacity, transform: [{ scale: pulseScale }] }]} />
+      </View>
+    );
+  }
+
   return (
     <View pointerEvents="none" style={[styles.wrap, { width: size, height: size }]}>
       <Animated.View style={[styles.corner, styles.cornerTopLeft, { borderColor: decoration.colors[0], transform: [{ scale: pulseScale }] }]} />
@@ -490,4 +539,85 @@ const styles = StyleSheet.create({
   sparkleTop: { top: 0, right: 15 },
   sparkleRight: { right: 1, bottom: 17 },
   sparkleLeft: { left: 5, bottom: 9 },
+  rainbowHalo: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 999,
+    borderWidth: 2,
+    borderColor: "rgba(255,255,255,0.48)",
+    shadowColor: "#f9a8d4",
+    shadowOpacity: 0.5,
+    shadowRadius: 10,
+  },
+  rainbowBandWrap: {
+    position: "absolute",
+    borderRadius: 999,
+    overflow: "hidden",
+    shadowColor: "#f9a8d4",
+    shadowOpacity: 0.58,
+    shadowRadius: 12,
+    elevation: 4,
+  },
+  rainbowBand: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 999,
+  },
+  rainbowShine: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 2,
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.42)",
+  },
+  cloud: {
+    position: "absolute",
+    width: "46%",
+    height: "27%",
+  },
+  cloudLeft: { left: -3, bottom: -3 },
+  cloudRight: { right: -5, top: 2, opacity: 0.82 },
+  cloudPuff: {
+    position: "absolute",
+    backgroundColor: "#fce7f3",
+    shadowColor: "#fff",
+    shadowOpacity: 0.55,
+    shadowRadius: 7,
+  },
+  cloudPuffLarge: {
+    width: "58%",
+    height: "88%",
+    borderRadius: 999,
+    left: 0,
+    bottom: 0,
+  },
+  cloudPuffMid: {
+    width: "54%",
+    height: "76%",
+    borderRadius: 999,
+    left: "30%",
+    bottom: "7%",
+    backgroundColor: "#fbcfe8",
+  },
+  cloudPuffSmall: {
+    width: "38%",
+    height: "58%",
+    borderRadius: 999,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "#f5d0fe",
+  },
+  rainbowDust: {
+    position: "absolute",
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: "#fff7ed",
+    shadowColor: "#fff",
+    shadowOpacity: 0.8,
+    shadowRadius: 5,
+  },
+  rainbowDustTop: { top: 1, left: "26%" },
+  rainbowDustLeft: { left: 0, top: "36%" },
+  rainbowDustRight: { right: 4, bottom: "26%" },
 });

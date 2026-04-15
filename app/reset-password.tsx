@@ -57,7 +57,7 @@ export default function ResetPasswordScreen() {
       }
 
       setEmailSent(true)
-    } catch (e) {
+    } catch {
       Alert.alert('Error', 'Something went wrong. Please try again.')
     } finally {
       setIsLoading(false)

@@ -18,6 +18,7 @@ function RootNavigator() {
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="settings" />
+        <Stack.Screen name="customize" />
         <Stack.Screen name="edit-profile" />
         <Stack.Screen
           name="modal"

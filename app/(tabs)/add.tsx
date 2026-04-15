@@ -32,7 +32,6 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  TouchableWithoutFeedback,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -43,6 +42,20 @@ let C = {
   accentGlow: "#a855f750",
 };
 let styles = createStyles(C);
+
+type SplitMode = "equal" | "custom" | "percent";
+
+const SPLIT_METHODS: { id: SplitMode; title: string; subtitle: string }[] = [
+  { id: "equal", title: "Equal", subtitle: "Everyone pays the same" },
+  { id: "custom", title: "Custom", subtitle: "Set dollar amounts" },
+  { id: "percent", title: "Percent", subtitle: "Split by percentage" },
+];
+
+const cleanNumberInput = (value: string) => value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1");
+const formatClampedNumber = (value: number, decimals = 2) => {
+  const fixed = value.toFixed(decimals);
+  return fixed.replace(/\.0+$/, "").replace(/(\.\d*?)0+$/, "$1");
+};
 
 // ── Animated entrance hook ───────────────────────────────────────────────────
 function useFadeSlide(delay = 0, isActive = true) {
@@ -94,7 +107,7 @@ function FloatingOrb({ style }: { style?: any }) {
   const scale = useRef(new Animated.Value(1)).current;
   const opacity = useRef(new Animated.Value(0.18)).current;
   useEffect(() => {
-    Animated.loop(
+    const loop = Animated.loop(
       Animated.sequence([
         Animated.parallel([
           Animated.timing(scale, { toValue: 1.18, duration: 3200, useNativeDriver: true }),
@@ -105,8 +118,11 @@ function FloatingOrb({ style }: { style?: any }) {
           Animated.timing(opacity, { toValue: 0.18, duration: 3200, useNativeDriver: true }),
         ]),
       ])
-    ).start();
-  }, []);
+    );
+
+    loop.start();
+    return () => loop.stop();
+  }, [opacity, scale]);
   return (
     <Animated.View
       style={[style, { opacity, transform: [{ scale }] }]}
@@ -123,7 +139,7 @@ function AnimatedAmount({ value }: { value: string }) {
       Animated.timing(scale, { toValue: 1.08, duration: 80, useNativeDriver: true }),
       Animated.spring(scale, { toValue: 1, tension: 200, friction: 8, useNativeDriver: true }),
     ]).start();
-  }, [value]);
+  }, [scale, value]);
   return (
     <Animated.Text style={[styles.amountPreview, { transform: [{ scale }] }]}>
       ${parseFloat(value || "0").toFixed(2)}
@@ -139,7 +155,7 @@ function GlowBar({ pct, color }: { pct: number; color: string }) {
       toValue: pct, tension: 60, friction: 10,
       useNativeDriver: false,
     }).start();
-  }, [pct]);
+  }, [pct, width]);
   return (
     <View style={styles.glowTrack}>
       <Animated.View
@@ -159,12 +175,18 @@ function GlowBar({ pct, color }: { pct: number; color: string }) {
 // ── Friend chip (animated in) ─────────────────────────────────────────────────
 function FriendChip({
   friend,
+  splitMode,
+  computedShare,
   onRemove,
   onAmountChange,
+  onPercentChange,
 }: {
   friend: any;
+  splitMode: SplitMode;
+  computedShare: number;
   onRemove: () => void;
   onAmountChange: (val: string) => void;
+  onPercentChange: (val: string) => void;
 }) {
   const anim = useFadeSlide(0);
   const initials = friend.full_name?.[0]?.toUpperCase() ?? "?";
@@ -178,16 +200,38 @@ function FriendChip({
           <Text style={styles.chipName}>{friend.full_name}</Text>
           <Text style={styles.chipHandle}>@{friend.username}</Text>
         </View>
-        <View style={styles.chipAmount}>
-          <Text style={styles.chipPrefix}>$</Text>
-          <TextInput
-            style={styles.chipInput}
-            keyboardType="decimal-pad"
-            value={friend.shareAmountInput}
-            onChangeText={onAmountChange}
-            placeholderTextColor={C.textMuted}
-          />
-        </View>
+        {splitMode === "equal" ? (
+          <View style={styles.chipStaticAmount}>
+            <Text style={styles.chipStaticLabel}>Equal</Text>
+            <Text style={styles.chipStaticValue}>${computedShare.toFixed(2)}</Text>
+          </View>
+        ) : splitMode === "percent" ? (
+          <View style={styles.chipPercentBlock}>
+            <View style={styles.chipAmount}>
+              <TextInput
+                style={styles.chipInput}
+                keyboardType="decimal-pad"
+                value={friend.sharePercentInput ?? "0"}
+                onChangeText={onPercentChange}
+                placeholder="0"
+                placeholderTextColor={C.textMuted}
+              />
+              <Text style={styles.chipPrefix}>%</Text>
+            </View>
+            <Text style={styles.chipComputedText}>${computedShare.toFixed(2)}</Text>
+          </View>
+        ) : (
+          <View style={styles.chipAmount}>
+            <Text style={styles.chipPrefix}>$</Text>
+            <TextInput
+              style={styles.chipInput}
+              keyboardType="decimal-pad"
+              value={friend.shareAmountInput}
+              onChangeText={onAmountChange}
+              placeholderTextColor={C.textMuted}
+            />
+          </View>
+        )}
         <Pressable hitSlop={10} onPress={onRemove} style={styles.chipRemoveButton}>
           <X size={14} color={C.red} />
         </Pressable>
@@ -211,6 +255,7 @@ export default function AddScreen({
   const [user, setUser] = useState<any>(null);
   const [friends, setFriends] = useState<any[]>([]);
   const [selectedFriends, setSelectedFriends] = useState<any[]>([]);
+  const [splitMode, setSplitMode] = useState<SplitMode>("equal");
   const [showFriends, setShowFriends] = useState(false);
   const [creating, setCreating] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -254,12 +299,94 @@ export default function AddScreen({
   };
 
   const totalAmount = parseFloat(total || "0");
-  const allocated = selectedFriends.reduce(
-    (s, f) => s + (parseFloat(f.shareAmountInput) || 0), 0
-  );
-  const creatorShare = Math.max(0, totalAmount - allocated);
+  const participantCount = selectedFriends.length + 1;
+  const evenShare = totalAmount > 0 ? totalAmount / participantCount : 0;
+  const getFriendShare = (friend: any) => {
+    if (splitMode === "equal") return evenShare;
+    if (splitMode === "percent") return totalAmount * ((parseFloat(friend.sharePercentInput ?? "0") || 0) / 100);
+    return parseFloat(friend.shareAmountInput) || 0;
+  };
+  const friendShares = selectedFriends.map(getFriendShare);
+  const allocated = friendShares.reduce((s, amount) => s + amount, 0);
+  const creatorShare = totalAmount > 0
+    ? splitMode === "equal"
+      ? evenShare
+      : Math.max(0, totalAmount - allocated)
+    : 0;
   const progressPct = totalAmount > 0 ? Math.min((allocated / totalAmount) * 100, 100) : 0;
-  const isComplete = totalAmount > 0 && Math.abs(creatorShare + allocated - totalAmount) < 0.01;
+  const isOverAllocated = totalAmount > 0 && allocated - totalAmount > 0.01;
+  const isComplete = totalAmount > 0 && !isOverAllocated;
+  const creatorPercent = totalAmount > 0 ? (creatorShare / totalAmount) * 100 : 0;
+
+  const selectSplitMode = (mode: SplitMode) => {
+    if (mode === "custom") {
+      setSelectedFriends((prev) =>
+        prev.map((friend, index) => ({
+          ...friend,
+          shareAmountInput: (friendShares[index] ?? 0).toFixed(2),
+        }))
+      );
+    }
+
+    if (mode === "percent") {
+      setSelectedFriends((prev) =>
+        prev.map((friend, index) => {
+          const share = friendShares[index] ?? 0;
+          const percent = totalAmount > 0 ? (share / totalAmount) * 100 : parseFloat(friend.sharePercentInput ?? "0") || 0;
+          return { ...friend, sharePercentInput: percent.toFixed(percent % 1 === 0 ? 0 : 1) };
+        })
+      );
+    }
+
+    setSplitMode(mode);
+    Haptics.selectionAsync();
+  };
+
+  const updateCustomShare = (friendId: string, value: string) => {
+    const cleaned = cleanNumberInput(value);
+    if (cleaned === "" || cleaned === ".") {
+      setSelectedFriends((prev) =>
+        prev.map((friend) => (friend.id === friendId ? { ...friend, shareAmountInput: cleaned } : friend))
+      );
+      return;
+    }
+
+    const requestedAmount = parseFloat(cleaned) || 0;
+    const usedByOthers = selectedFriends.reduce((sum, friend) => {
+      if (friend.id === friendId) return sum;
+      return sum + (parseFloat(friend.shareAmountInput) || 0);
+    }, 0);
+    const maxAmount = Math.max(0, totalAmount - usedByOthers);
+    const nextAmount = Math.min(requestedAmount, maxAmount);
+    const nextInput = requestedAmount > maxAmount ? formatClampedNumber(nextAmount) : cleaned;
+
+    setSelectedFriends((prev) =>
+      prev.map((friend) => (friend.id === friendId ? { ...friend, shareAmountInput: nextInput } : friend))
+    );
+  };
+
+  const updatePercentShare = (friendId: string, value: string) => {
+    const cleaned = cleanNumberInput(value);
+    if (cleaned === "" || cleaned === ".") {
+      setSelectedFriends((prev) =>
+        prev.map((friend) => (friend.id === friendId ? { ...friend, sharePercentInput: cleaned } : friend))
+      );
+      return;
+    }
+
+    const requestedPercent = parseFloat(cleaned) || 0;
+    const usedByOthers = selectedFriends.reduce((sum, friend) => {
+      if (friend.id === friendId) return sum;
+      return sum + (parseFloat(friend.sharePercentInput ?? "0") || 0);
+    }, 0);
+    const maxPercent = Math.max(0, 100 - usedByOthers);
+    const nextPercent = Math.min(requestedPercent, maxPercent);
+    const nextInput = requestedPercent > maxPercent ? formatClampedNumber(nextPercent, 1) : cleaned;
+
+    setSelectedFriends((prev) =>
+      prev.map((friend) => (friend.id === friendId ? { ...friend, sharePercentInput: nextInput } : friend))
+    );
+  };
 
   async function handleCreateSplit() {
     const trimmedTitle = occasionName.trim();
@@ -270,6 +397,10 @@ export default function AddScreen({
     }
     if (isNaN(amount) || amount <= 0) {
       Alert.alert("Invalid Amount", "Enter a valid total amount.");
+      return;
+    }
+    if (isOverAllocated) {
+      Alert.alert("Too Much Assigned", "The friend shares are more than the total bill. Lower one of the amounts or percentages.");
       return;
     }
     setCreating(true);
@@ -283,10 +414,10 @@ export default function AddScreen({
             sharePercentage: (creatorShare / amount) * 100,
             shareAmount: creatorShare,
           },
-          ...selectedFriends.map((f) => ({
+          ...selectedFriends.map((f, index) => ({
             profileId: f.id,
-            sharePercentage: ((parseFloat(f.shareAmountInput) || 0) / amount) * 100,
-            shareAmount: -(parseFloat(f.shareAmountInput) || 0),
+            sharePercentage: ((friendShares[index] ?? 0) / amount) * 100,
+            shareAmount: -(friendShares[index] ?? 0),
           })),
         ],
       });
@@ -296,6 +427,7 @@ export default function AddScreen({
       setOccasionName("");
       setTotal("");
       setSelectedFriends([]);
+      setSplitMode("equal");
     } catch (err) {
       console.error(err);
       Alert.alert("Error", err instanceof Error ? err.message : "Could not create split.");
@@ -305,7 +437,6 @@ export default function AddScreen({
   }
 
   return (
-    <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
       <SafeAreaView edges={["top", "left", "right"]} style={styles.safe}>
         <AppBackground />
         {backgroundMode === "default" ? (
@@ -318,6 +449,7 @@ export default function AddScreen({
         <ScrollView
           contentContainerStyle={styles.scroll}
           showsVerticalScrollIndicator={false}
+          onScrollBeginDrag={Keyboard.dismiss}
           keyboardShouldPersistTaps="never"
           keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
           refreshControl={
@@ -395,19 +527,33 @@ export default function AddScreen({
           <Animated.View style={[styles.glassCard, card3Anim]}>
             <View style={styles.cardHeaderRow}>
               <Text style={styles.cardLabel}>Participants</Text>
-              <Pressable
-                style={styles.splitEvenBtn}
-                onPress={() => {
-                  const per = totalAmount / (selectedFriends.length + 1);
-                  setSelectedFriends((p) =>
-                    p.map((f) => ({ ...f, shareAmount: per, shareAmountInput: per.toFixed(2) }))
+              <View style={styles.peopleBadge}>
+                <Text style={styles.peopleBadgeText}>{participantCount} people</Text>
+              </View>
+            </View>
+
+            <View style={styles.methodPanel}>
+              <Text style={styles.methodEyebrow}>Split Method</Text>
+              <View style={styles.methodGrid}>
+                {SPLIT_METHODS.map((method) => {
+                  const active = splitMode === method.id;
+                  const Icon = method.id === "percent" ? Percent : method.id === "custom" ? Sparkles : CheckCircle;
+
+                  return (
+                    <Pressable
+                      key={method.id}
+                      style={[styles.methodCard, active && styles.methodCardActive]}
+                      onPress={() => selectSplitMode(method.id)}
+                    >
+                      <View style={[styles.methodIcon, active && styles.methodIconActive]}>
+                        <Icon size={14} color={active ? "#fff" : C.accentBright} />
+                      </View>
+                      <Text style={[styles.methodTitle, active && styles.methodTitleActive]}>{method.title}</Text>
+                      <Text style={[styles.methodSubtitle, active && styles.methodSubtitleActive]}>{method.subtitle}</Text>
+                    </Pressable>
                   );
-                  Haptics.selectionAsync();
-                }}
-              >
-                <Percent size={11} color={C.accent} />
-                <Text style={styles.splitEvenText}>Even Split</Text>
-              </Pressable>
+                })}
+              </View>
             </View>
 
             {/* You row */}
@@ -420,23 +566,26 @@ export default function AddScreen({
                 <Text style={styles.youSub}>organizer</Text>
               </View>
               <View style={styles.youShare}>
-                <Text style={styles.youShareLabel}>owes</Text>
+                <Text style={styles.youShareLabel}>{creatorPercent.toFixed(0)}%</Text>
                 <Text style={styles.youShareAmt}>${creatorShare.toFixed(2)}</Text>
               </View>
             </View>
 
             {/* Friends */}
-            {selectedFriends.map((friend) => (
+            {selectedFriends.map((friend, index) => (
               <FriendChip
                 key={friend.id}
                 friend={friend}
+                splitMode={splitMode}
+                computedShare={friendShares[index] ?? 0}
                 onRemove={() =>
                   setSelectedFriends((p) => p.filter((f) => f.id !== friend.id))
                 }
                 onAmountChange={(val) =>
-                  setSelectedFriends((p) =>
-                    p.map((f) => (f.id === friend.id ? { ...f, shareAmountInput: val } : f))
-                  )
+                  updateCustomShare(friend.id, val)
+                }
+                onPercentChange={(val) =>
+                  updatePercentShare(friend.id, val)
                 }
               />
             ))}
@@ -446,19 +595,27 @@ export default function AddScreen({
               <View style={styles.progressSection}>
                 <View style={styles.progressLabelRow}>
                   <Text style={styles.progressText}>
-                    ${allocated.toFixed(2)} split across friends
+                    ${allocated.toFixed(2)} assigned to friends
                   </Text>
                   {isComplete && (
                     <View style={styles.completeBadge}>
                       <CheckCircle size={11} color={C.green} />
-                      <Text style={styles.completeBadgeText}>Balanced</Text>
+                      <Text style={styles.completeBadgeText}>Ready</Text>
+                    </View>
+                  )}
+                  {isOverAllocated && (
+                    <View style={styles.overBadge}>
+                      <Text style={styles.overBadgeText}>Over total</Text>
                     </View>
                   )}
                 </View>
                 <GlowBar
                   pct={progressPct}
-                  color={isComplete ? C.green : C.accent}
+                  color={isOverAllocated ? C.red : isComplete ? C.green : C.accent}
                 />
+                <Text style={styles.creatorRemainderText}>
+                  Your share is the remaining ${creatorShare.toFixed(2)}.
+                </Text>
               </View>
             )}
 
@@ -500,7 +657,7 @@ export default function AddScreen({
                           if (added) return;
                           setSelectedFriends((p) => [
                             ...p,
-                            { ...fp, shareAmount: 0, shareAmountInput: "0.00" },
+                            { ...fp, shareAmount: 0, shareAmountInput: "0.00", sharePercentInput: "0" },
                           ]);
                           Haptics.selectionAsync();
                         }}
@@ -547,7 +704,6 @@ export default function AddScreen({
           </Animated.View>
         </ScrollView>
       </SafeAreaView>
-    </TouchableWithoutFeedback>
   );
 }
 
@@ -635,6 +791,15 @@ return StyleSheet.create({
   cardHeaderRow: {
     flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 14,
   },
+  peopleBadge: {
+    backgroundColor: C.surface,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: C.border,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  peopleBadgeText: { color: C.textSecondary, fontSize: 11, fontWeight: "800" },
   occasionInput: {
     fontSize: 16, color: C.textPrimary,
     backgroundColor: C.surface, borderRadius: 12,
@@ -642,7 +807,52 @@ return StyleSheet.create({
     borderWidth: 1, borderColor: C.border,
   },
 
-  // split evenly
+  // split method
+  methodPanel: {
+    backgroundColor: C.surface,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: C.border,
+    padding: 10,
+    marginBottom: 12,
+  },
+  methodEyebrow: {
+    color: C.textSecondary,
+    fontSize: 10,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 1,
+    marginBottom: 9,
+    paddingHorizontal: 2,
+  },
+  methodGrid: { flexDirection: "row", gap: 8 },
+  methodCard: {
+    flex: 1,
+    minHeight: 92,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.card,
+    padding: 10,
+  },
+  methodCardActive: {
+    backgroundColor: C.accent,
+    borderColor: C.accentBright,
+  },
+  methodIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 9,
+    backgroundColor: C.accentDim,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 8,
+  },
+  methodIconActive: { backgroundColor: "rgba(255,255,255,0.2)" },
+  methodTitle: { color: C.textPrimary, fontSize: 13, fontWeight: "900" },
+  methodTitleActive: { color: "#fff" },
+  methodSubtitle: { color: C.textSecondary, fontSize: 10, fontWeight: "700", lineHeight: 13, marginTop: 3 },
+  methodSubtitleActive: { color: "rgba(255,255,255,0.82)" },
   splitEvenBtn: {
     flexDirection: "row", alignItems: "center", gap: 5,
     backgroundColor: C.accentDim, paddingHorizontal: 10, paddingVertical: 5,
@@ -692,6 +902,11 @@ return StyleSheet.create({
     fontSize: 16, fontWeight: "700", color: C.accentBright,
     minWidth: 64, textAlign: "right",
   },
+  chipStaticAmount: { alignItems: "flex-end" },
+  chipStaticLabel: { color: C.textMuted, fontSize: 10, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.6 },
+  chipStaticValue: { color: C.accentBright, fontSize: 16, fontWeight: "900", marginTop: 2 },
+  chipPercentBlock: { alignItems: "flex-end" },
+  chipComputedText: { color: C.textSecondary, fontSize: 10, fontWeight: "800", marginTop: 1 },
 
   chipRemoveButton: {
     width: 30,
@@ -710,13 +925,23 @@ return StyleSheet.create({
     flexDirection: "row", justifyContent: "space-between",
     alignItems: "center", marginBottom: 8,
   },
-  progressText: { fontSize: 11, color: C.textSecondary },
+  progressText: { flex: 1, fontSize: 11, color: C.textSecondary },
   completeBadge: {
     flexDirection: "row", alignItems: "center", gap: 4,
     backgroundColor: C.greenDim, paddingHorizontal: 8, paddingVertical: 3,
     borderRadius: 20, borderWidth: 1, borderColor: C.green + "44",
   },
   completeBadgeText: { fontSize: 10, color: C.green, fontWeight: "700" },
+  overBadge: {
+    backgroundColor: C.redDim,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: C.red + "44",
+  },
+  overBadgeText: { fontSize: 10, color: C.red, fontWeight: "800" },
+  creatorRemainderText: { color: C.textMuted, fontSize: 10, marginTop: 7, fontWeight: "600" },
   glowTrack: {
     height: 5, backgroundColor: C.surface,
     borderRadius: 3, overflow: "hidden",

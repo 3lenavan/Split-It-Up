@@ -1,11 +1,11 @@
-import { APP_BACKGROUND_OPTIONS, THEME_OPTIONS, useAppTheme } from "@/lib/app-theme";
+import { useAppTheme } from "@/lib/app-theme";
 import { AvatarDecoration } from "@/lib/avatar-decoration";
-import { AppBackground, AppBackgroundPreview } from "@/lib/app-background";
+import { AppBackground } from "@/lib/app-background";
 import { supabase } from "@/lib/supabaseClient";
 import { useIsFocused } from "@react-navigation/native";
 import { router } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
-import { ArrowLeft, Check, ChevronRight, LogOut, User } from "lucide-react-native";
+import { ArrowLeft, ChevronRight, LogOut, Palette, User } from "lucide-react-native";
 import { useEffect, useRef, useState } from "react";
 import { Alert, Animated, Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -38,7 +38,7 @@ function FloatingOrb({ style }: { style?: any }) {
   const opacity = useRef(new Animated.Value(0.18)).current;
 
   useEffect(() => {
-    Animated.loop(
+    const loop = Animated.loop(
       Animated.sequence([
         Animated.parallel([
           Animated.timing(scale, { toValue: 1.18, duration: 3200, useNativeDriver: true }),
@@ -49,7 +49,10 @@ function FloatingOrb({ style }: { style?: any }) {
           Animated.timing(opacity, { toValue: 0.18, duration: 3200, useNativeDriver: true }),
         ]),
       ])
-    ).start();
+    );
+
+    loop.start();
+    return () => loop.stop();
   }, [opacity, scale]);
 
   return <Animated.View pointerEvents="none" style={[style, { opacity, transform: [{ scale }] }]} />;
@@ -57,7 +60,7 @@ function FloatingOrb({ style }: { style?: any }) {
 
 export default function SettingsScreen() {
   const isFocused = useIsFocused();
-  const { palette: C, mode, setMode, backgroundMode, setBackgroundMode } = useAppTheme();
+  const { palette: C, backgroundMode } = useAppTheme();
   const styles = createStyles(C);
   const [profileName, setProfileName] = useState("friend");
   const [profileUsername, setProfileUsername] = useState("");
@@ -70,11 +73,12 @@ export default function SettingsScreen() {
   const farewellSlide = useRef(new Animated.Value(20)).current;
   const farewellGlow = useRef(new Animated.Value(1)).current;
   const farewellProgress = useRef(new Animated.Value(0)).current;
+  const logoutGlowLoop = useRef<Animated.CompositeAnimation | null>(null);
 
   const headerAnim = useFadeSlide(0, isFocused);
   const heroAnim = useFadeSlide(80, isFocused);
   const profileAnim = useFadeSlide(160, isFocused);
-  const appearanceAnim = useFadeSlide(240, isFocused);
+  const customizeAnim = useFadeSlide(240, isFocused);
   const logoutAnim = useFadeSlide(320, isFocused);
 
   useEffect(() => {
@@ -93,6 +97,7 @@ export default function SettingsScreen() {
     loadProfile();
 
     return () => {
+      logoutGlowLoop.current?.stop();
       logoutTimers.current.forEach(clearTimeout);
       logoutTimers.current = [];
     };
@@ -129,21 +134,27 @@ export default function SettingsScreen() {
           farewellGlow.setValue(1);
           farewellProgress.setValue(0);
           setLogoutPhase("farewell");
+          logoutGlowLoop.current?.stop();
+          const glowLoop = Animated.loop(
+            Animated.sequence([
+              Animated.timing(farewellGlow, { toValue: 1.08, duration: 800, useNativeDriver: true }),
+              Animated.timing(farewellGlow, { toValue: 1, duration: 800, useNativeDriver: true }),
+            ])
+          );
+          logoutGlowLoop.current = glowLoop;
 
           Animated.parallel([
             Animated.timing(farewellOpacity, { toValue: 1, duration: 320, useNativeDriver: true }),
             Animated.spring(farewellScale, { toValue: 1, tension: 85, friction: 12, useNativeDriver: true }),
             Animated.spring(farewellSlide, { toValue: 0, tension: 85, friction: 12, useNativeDriver: true }),
             Animated.timing(farewellProgress, { toValue: 1, duration: 1550, useNativeDriver: false }),
-            Animated.loop(
-              Animated.sequence([
-                Animated.timing(farewellGlow, { toValue: 1.08, duration: 800, useNativeDriver: true }),
-                Animated.timing(farewellGlow, { toValue: 1, duration: 800, useNativeDriver: true }),
-              ])
-            ),
+            glowLoop,
           ]).start();
 
           logoutTimers.current.push(
+            setTimeout(() => {
+              logoutGlowLoop.current?.stop();
+            }, 1600),
             setTimeout(async () => {
               await supabase.auth.signOut();
               router.replace("/auth");
@@ -224,85 +235,29 @@ export default function SettingsScreen() {
           </Pressable>
         </Animated.View>
 
-        <Animated.View style={[styles.glassCard, appearanceAnim]}>
+        <Animated.View style={[styles.glassCard, customizeAnim]}>
           <View style={styles.sectionTop}>
             <View>
-              <Text style={styles.sectionEyebrow}>Appearance</Text>
-              <Text style={styles.sectionTitle}>Theme</Text>
+              <Text style={styles.sectionEyebrow}>Customize</Text>
+              <Text style={styles.sectionTitle}>Theme and background</Text>
             </View>
             <View style={styles.sectionBadge}>
-              <Text style={styles.sectionBadgeText}>More soon</Text>
+              <Text style={styles.sectionBadgeText}>Personalize</Text>
             </View>
           </View>
 
-          <View style={styles.themeGrid}>
-            {THEME_OPTIONS.map((option) => {
-              const isActive = mode === option.id;
-
-              return (
-                <Pressable
-                  key={option.id}
-                  style={[styles.themeCard, isActive && styles.themeCardActive]}
-                  onPress={() => setMode(option.id)}
-                >
-                  <View style={styles.themeSwatches}>
-                    {option.colors.map((color, index) => (
-                      <View
-                        key={`${option.id}-${color}`}
-                        style={[
-                          styles.themeSwatch,
-                          {
-                            backgroundColor: color,
-                            marginLeft: index === 0 ? 0 : -8,
-                            borderColor: isActive ? C.accentBright : C.border,
-                          },
-                        ]}
-                      />
-                    ))}
-                  </View>
-                  <Text style={styles.themeTitle}>{option.name}</Text>
-                  <Text style={styles.themeDescription}>{option.description}</Text>
-                  {isActive ? (
-                    <View style={styles.themeCheck}>
-                      <Check size={14} color="#fff" />
-                    </View>
-                  ) : null}
-                </Pressable>
-              );
-            })}
-          </View>
-
-          <View style={styles.appearanceDivider} />
-
-          <View style={styles.appearanceSubhead}>
-            <Text style={styles.appearanceSubheadTitle}>App Background</Text>
-            <Text style={styles.appearanceSubheadText}>Choose what sits behind the pages.</Text>
-          </View>
-
-          <View style={styles.backgroundGrid}>
-            {APP_BACKGROUND_OPTIONS.map((option) => {
-              const isActive = backgroundMode === option.id;
-
-              return (
-                <Pressable
-                  key={option.id}
-                  style={[styles.backgroundCard, isActive && styles.backgroundCardActive]}
-                  onPress={() => setBackgroundMode(option.id)}
-                >
-                  <View style={styles.backgroundPreview}>
-                    <AppBackgroundPreview mode={option.id} />
-                  </View>
-                  <Text style={styles.backgroundTitle}>{option.name}</Text>
-                  <Text style={styles.backgroundDescription}>{option.description}</Text>
-                  {isActive ? (
-                    <View style={styles.themeCheck}>
-                      <Check size={14} color="#fff" />
-                    </View>
-                  ) : null}
-                </Pressable>
-              );
-            })}
-          </View>
+          <Pressable style={styles.actionRow} onPress={() => router.push("/customize" as any)}>
+            <View style={styles.actionIconWrap}>
+              <View style={styles.actionAvatarBase}>
+                <Palette size={18} color={C.accentBright} />
+              </View>
+            </View>
+            <View style={styles.actionBody}>
+              <Text style={styles.actionTitle}>Customize</Text>
+              <Text style={styles.actionSubtitle}>Change the app theme and page background.</Text>
+            </View>
+            <ChevronRight size={18} color={C.textSecondary} />
+          </Pressable>
         </Animated.View>
 
         <Animated.View style={[styles.glassCard, logoutAnim]}>
