@@ -3,9 +3,9 @@
  * Dark theme matching add/profile screens. All features preserved.
  * Smooth entrance animations, glowing cards, animated balance summary.
  *****************************************************************************/
-import { supabase } from "@/lib/supabaseClient";
 import { AppBackground } from "@/lib/app-background";
 import { THEME_PALETTES, useAppTheme } from "@/lib/app-theme";
+import { supabase } from "@/lib/supabaseClient";
 import { useIsFocused } from "@react-navigation/native";
 import { ChevronDown, Edit2, House, Receipt, SlidersHorizontal, Trash2, TrendingUp, Users } from "lucide-react-native";
 import { useEffect, useRef, useState } from "react";
@@ -156,6 +156,7 @@ type SplitCardProps = {
   currentUserId: string | null;
   entryDelay: number;
   isFocused: boolean;
+  onOpenDetails: (split: Split) => void;
   onMenuOpen: (split: Split, position: { x: number; y: number }) => void;
   onDelete: (split: Split) => void;
   onRequestPayment: (split: Split) => void;
@@ -163,7 +164,7 @@ type SplitCardProps = {
   styles: HomeStyles;
 };
 
-function SplitCard({ split, currentUserId, entryDelay, isFocused, onMenuOpen, onDelete, onRequestPayment, palette: C, styles }: SplitCardProps) {
+function SplitCard({ split, currentUserId, entryDelay, isFocused, onOpenDetails, onMenuOpen, onDelete, onRequestPayment, palette: C, styles }: SplitCardProps) {
   const menuButtonRef = useRef<View>(null);
   const entryAnim = useFadeSlide(entryDelay, isFocused);
 
@@ -202,7 +203,7 @@ function SplitCard({ split, currentUserId, entryDelay, isFocused, onMenuOpen, on
         failOffsetY={[-6, 6]}
         dragOffsetFromRightEdge={24}
       >
-        <View style={styles.card}>
+        <Pressable style={styles.card} onPress={() => onOpenDetails(split)}>
           {/* top accent line */}
           <View style={[styles.cardAccentLine, { backgroundColor: statusColor }]} />
 
@@ -217,7 +218,15 @@ function SplitCard({ split, currentUserId, entryDelay, isFocused, onMenuOpen, on
               </Text>
               <Text style={styles.cardOwner} numberOfLines={1}>Owner: {ownerLabel}</Text>
             </View>
-            <Pressable ref={menuButtonRef} hitSlop={10} style={styles.menuTrigger} onPress={handleMenuPress}>
+            <Pressable
+              ref={menuButtonRef}
+              hitSlop={10}
+              style={styles.menuTrigger}
+              onPress={(event) => {
+                event.stopPropagation();
+                handleMenuPress();
+              }}
+            >
               <Text style={styles.menuDots}>⋯</Text>
             </Pressable>
           </View>
@@ -246,7 +255,10 @@ function SplitCard({ split, currentUserId, entryDelay, isFocused, onMenuOpen, on
             <View style={styles.paymentActionWrap}>
               <Pressable
                 style={[styles.paymentActionButton, split.paymentRequested && styles.paymentActionButtonSent]}
-                onPress={() => onRequestPayment(split)}
+                onPress={(event) => {
+                  event.stopPropagation();
+                  onRequestPayment(split);
+                }}
                 disabled={split.paymentRequested}
               >
                 <Text style={[styles.paymentActionText, split.paymentRequested && styles.paymentActionTextSent]}>
@@ -275,7 +287,7 @@ function SplitCard({ split, currentUserId, entryDelay, isFocused, onMenuOpen, on
               </View>
             </View>
           )}
-        </View>
+        </Pressable>
       </Swipeable>
     </Animated.View>
   );
@@ -292,6 +304,7 @@ export default function HomeScreen() {
   const isFocused = useIsFocused();
   const [loading, setLoading] = useState(true);
   const [selectedSplit, setSelectedSplit] = useState<Split | null>(null);
+  const [detailSplit, setDetailSplit] = useState<Split | null>(null);
   const [actionMenuVisible, setActionMenuVisible] = useState(false);
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
   const [editModalVisible, setEditModalVisible] = useState(false);
@@ -732,6 +745,68 @@ export default function HomeScreen() {
     );
   };
 
+  const detailOwner = detailSplit?.friends.find((friend) => friend.id === detailSplit.creator_id);
+  const detailOwnerName = currentUserId === detailSplit?.creator_id
+    ? "You"
+    : detailOwner?.name || detailSplit?.creatorName || detailSplit?.creatorUsername || "Owner";
+  const detailOwnerHandle = detailSplit?.creatorUsername ? `@${detailSplit.creatorUsername}` : detailSplit?.creatorName || "Unknown";
+  const detailOtherOwed = detailSplit
+    ? detailSplit.friends
+        .filter((friend) => friend.id !== detailSplit.creator_id)
+        .reduce((sum, friend) => sum + Math.abs(Math.min(Number(friend.balance ?? 0), 0)), 0)
+      + (currentUserId !== detailSplit.creator_id ? Math.abs(Math.min(detailSplit.myBalance, 0)) : 0)
+    : 0;
+  const detailOwnerShare = detailSplit
+    ? Math.max(0, Number(detailSplit.total_amount ?? 0) - detailOtherOwed)
+    : 0;
+  const detailMyAmount = detailSplit ? Math.abs(detailSplit.myBalance) : 0;
+  const detailMyLabel = detailSplit
+    ? currentUserId === detailSplit.creator_id
+      ? detailSplit.myBalance > BALANCE_EPSILON
+        ? "You are owed"
+        : "Your balance"
+      : detailSplit.myBalance < -BALANCE_EPSILON
+        ? "You owe"
+        : "Your balance"
+    : "Your balance";
+  const detailMemberRows = detailSplit
+    ? [
+        {
+          id: detailSplit.creator_id,
+          name: detailOwnerName,
+          role: "Owner",
+          amount: detailOwnerShare,
+          label: "Owner share",
+          tone: "accent" as const,
+        },
+        ...(currentUserId && currentUserId !== detailSplit.creator_id
+          ? [{
+              id: currentUserId,
+              name: "You",
+              role: "Member",
+              amount: Math.abs(detailSplit.myBalance),
+              label: detailSplit.myBalance < -BALANCE_EPSILON ? "Owes" : "Settled",
+              tone: detailSplit.myBalance < -BALANCE_EPSILON ? "red" as const : "muted" as const,
+            }]
+          : []),
+        ...detailSplit.friends
+          .filter((friend) => friend.id !== detailSplit.creator_id)
+          .map((friend) => {
+            const amount = Math.abs(Number(friend.balance ?? 0));
+            const isSettled = amount <= BALANCE_EPSILON;
+
+            return {
+              id: friend.id,
+              name: friend.name || "Unknown",
+              role: "Member",
+              amount,
+              label: isSettled ? "Settled" : "Owes",
+              tone: isSettled ? "muted" as const : "red" as const,
+            };
+          }),
+      ]
+    : [];
+
   return (
     <SafeAreaView style={styles.safe}>
       <AppBackground />
@@ -874,6 +949,7 @@ export default function HomeScreen() {
               currentUserId={currentUserId}
               entryDelay={280 + Math.min(index, 6) * 45}
               isFocused={isFocused}
+              onOpenDetails={setDetailSplit}
               onMenuOpen={openActionMenu}
               onDelete={confirmDeleteSplit}
               onRequestPayment={handleRequestPayment}
@@ -885,6 +961,82 @@ export default function HomeScreen() {
       </ScrollView>
 
       {/* ── ACTION POPOVER ── */}
+      <Modal visible={!!detailSplit} animationType="fade" transparent onRequestClose={() => setDetailSplit(null)}>
+        <Pressable style={styles.detailOverlay} onPress={() => setDetailSplit(null)}>
+          <Pressable style={styles.detailSheet} onPress={(event) => event.stopPropagation()}>
+            {detailSplit ? (
+              <>
+                <View style={styles.detailHandle} />
+                <View style={styles.detailHeader}>
+                  <View style={styles.detailIcon}>
+                    <Receipt size={18} color={C.accentBright} />
+                  </View>
+                  <View style={styles.detailTitleBlock}>
+                    <Text style={styles.detailEyebrow}>Split details</Text>
+                    <Text style={styles.detailTitle}>{detailSplit.title}</Text>
+                  </View>
+                  <Pressable style={styles.detailCloseButton} onPress={() => setDetailSplit(null)}>
+                    <Text style={styles.detailCloseText}>Close</Text>
+                  </Pressable>
+                </View>
+
+                <View style={styles.detailHero}>
+                  <View>
+                    <Text style={styles.detailHeroLabel}>Owner</Text>
+                    <Text style={styles.detailHeroValue}>{detailOwnerName}</Text>
+                    <Text style={styles.detailHeroMeta}>{detailOwnerHandle}</Text>
+                  </View>
+                  <View style={styles.detailTotalPill}>
+                    <Text style={styles.detailTotalLabel}>Total</Text>
+                    <Text style={styles.detailTotalValue}>${Number(detailSplit.total_amount).toFixed(2)}</Text>
+                  </View>
+                </View>
+
+                <View style={styles.detailStatsRow}>
+                  <View style={styles.detailStatCard}>
+                    <Text style={styles.detailStatLabel}>Owner share</Text>
+                    <Text style={[styles.detailStatValue, { color: C.accentBright }]}>${detailOwnerShare.toFixed(2)}</Text>
+                  </View>
+                  <View style={styles.detailStatCard}>
+                    <Text style={styles.detailStatLabel}>Others owe</Text>
+                    <Text style={[styles.detailStatValue, { color: C.red }]}>${detailOtherOwed.toFixed(2)}</Text>
+                  </View>
+                  <View style={styles.detailStatCard}>
+                    <Text style={styles.detailStatLabel}>{detailMyLabel}</Text>
+                    <Text style={[styles.detailStatValue, { color: detailSplit.myBalance < -BALANCE_EPSILON ? C.red : detailSplit.myBalance > BALANCE_EPSILON ? C.green : C.textPrimary }]}>
+                      ${detailMyAmount.toFixed(2)}
+                    </Text>
+                  </View>
+                </View>
+
+                <Text style={styles.detailSectionTitle}>Who pays what</Text>
+                <ScrollView style={styles.detailMembersList} contentContainerStyle={styles.detailMembersContent} showsVerticalScrollIndicator={false}>
+                  {detailMemberRows.map((member) => {
+                    const amountColor = member.tone === "red" ? C.red : member.tone === "accent" ? C.accentBright : C.textSecondary;
+
+                    return (
+                      <View key={`${member.id}-${member.role}`} style={styles.detailMemberRow}>
+                        <View style={styles.detailMemberAvatar}>
+                          <Text style={styles.detailMemberAvatarText}>{member.name.charAt(0).toUpperCase()}</Text>
+                        </View>
+                        <View style={styles.detailMemberBody}>
+                          <Text style={styles.detailMemberName}>{member.name}</Text>
+                          <Text style={styles.detailMemberRole}>{member.role}</Text>
+                        </View>
+                        <View style={styles.detailMemberAmountBlock}>
+                          <Text style={[styles.detailMemberAmount, { color: amountColor }]}>${member.amount.toFixed(2)}</Text>
+                          <Text style={styles.detailMemberLabel}>{member.label}</Text>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </ScrollView>
+              </>
+            ) : null}
+          </Pressable>
+        </Pressable>
+      </Modal>
+
       <Modal visible={actionMenuVisible} animationType="fade" transparent onRequestClose={closeActionMenu}>
         <Pressable style={styles.popoverOverlay} onPress={closeActionMenu}>
           <Pressable style={[styles.popoverMenu, { top: menuPosition.y, left: menuPosition.x }]} onPress={(e) => e.stopPropagation()}>
@@ -1103,6 +1255,41 @@ return StyleSheet.create({
   friendPillText: { fontSize: 10, color: C.accentBright, fontWeight: "600" },
   friendPillExtra: { backgroundColor: C.surface, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 },
   friendPillExtraText: { fontSize: 10, color: C.textSecondary },
+
+  // details modal
+  detailOverlay: { flex: 1, backgroundColor: C.mode === "dark" ? `${C.bg}d9` : "rgba(24,24,38,0.24)", justifyContent: "flex-end", padding: 14 },
+  detailSheet: { maxHeight: "82%", backgroundColor: C.card, borderRadius: 26, borderWidth: 1, borderColor: C.border, padding: 18, shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 24, shadowOffset: { width: 0, height: 10 }, elevation: 12 },
+  detailHandle: { alignSelf: "center", width: 42, height: 4, borderRadius: 999, backgroundColor: C.borderBright, marginBottom: 16 },
+  detailHeader: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 16 },
+  detailIcon: { width: 42, height: 42, borderRadius: 14, backgroundColor: C.accentDim, borderWidth: 1, borderColor: C.accent + "44", alignItems: "center", justifyContent: "center" },
+  detailTitleBlock: { flex: 1, minWidth: 0 },
+  detailEyebrow: { color: C.textSecondary, fontSize: 10, fontWeight: "800", textTransform: "uppercase", letterSpacing: 1 },
+  detailTitle: { color: C.textPrimary, fontSize: 22, fontWeight: "900", letterSpacing: -0.4, marginTop: 2 },
+  detailCloseButton: { backgroundColor: C.surface, borderRadius: 12, borderWidth: 1, borderColor: C.border, paddingHorizontal: 12, paddingVertical: 9 },
+  detailCloseText: { color: C.textSecondary, fontSize: 12, fontWeight: "800" },
+  detailHero: { flexDirection: "row", justifyContent: "space-between", gap: 12, backgroundColor: C.surface, borderRadius: 18, borderWidth: 1, borderColor: C.border, padding: 14, marginBottom: 12 },
+  detailHeroLabel: { color: C.textMuted, fontSize: 10, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.8 },
+  detailHeroValue: { color: C.textPrimary, fontSize: 16, fontWeight: "900", marginTop: 4 },
+  detailHeroMeta: { color: C.accentBright, fontSize: 12, fontWeight: "700", marginTop: 2 },
+  detailTotalPill: { alignItems: "flex-end", justifyContent: "center", backgroundColor: C.accentDim, borderRadius: 14, borderWidth: 1, borderColor: C.accent + "44", paddingHorizontal: 12, paddingVertical: 8 },
+  detailTotalLabel: { color: C.textSecondary, fontSize: 10, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.8 },
+  detailTotalValue: { color: C.accentBright, fontSize: 18, fontWeight: "900", marginTop: 2 },
+  detailStatsRow: { flexDirection: "row", gap: 8, marginBottom: 16 },
+  detailStatCard: { flex: 1, backgroundColor: C.surface, borderRadius: 16, borderWidth: 1, borderColor: C.border, padding: 10, minHeight: 74, justifyContent: "space-between" },
+  detailStatLabel: { color: C.textSecondary, fontSize: 9, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.5 },
+  detailStatValue: { fontSize: 15, fontWeight: "900", marginTop: 8 },
+  detailSectionTitle: { color: C.textPrimary, fontSize: 16, fontWeight: "900", marginBottom: 10 },
+  detailMembersList: { maxHeight: 300 },
+  detailMembersContent: { gap: 9, paddingBottom: 4 },
+  detailMemberRow: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: C.surface, borderRadius: 16, borderWidth: 1, borderColor: C.border, padding: 12 },
+  detailMemberAvatar: { width: 40, height: 40, borderRadius: 13, backgroundColor: C.accentDim, borderWidth: 1, borderColor: C.accent + "33", alignItems: "center", justifyContent: "center" },
+  detailMemberAvatarText: { color: C.accentBright, fontSize: 15, fontWeight: "900" },
+  detailMemberBody: { flex: 1, minWidth: 0 },
+  detailMemberName: { color: C.textPrimary, fontSize: 14, fontWeight: "800" },
+  detailMemberRole: { color: C.textSecondary, fontSize: 11, fontWeight: "700", marginTop: 2 },
+  detailMemberAmountBlock: { alignItems: "flex-end" },
+  detailMemberAmount: { fontSize: 15, fontWeight: "900" },
+  detailMemberLabel: { color: C.textMuted, fontSize: 10, fontWeight: "800", marginTop: 2, textTransform: "uppercase" },
 
   // swipe delete
   swipeDelete: { width: 88, marginBottom: 14, borderRadius: 20, backgroundColor: C.red, alignItems: "center", justifyContent: "center", gap: 4 },
