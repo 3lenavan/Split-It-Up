@@ -13,7 +13,9 @@ export type AvatarDecorationId =
   | "flame"
   | "kitty"
   | "sparkle"
-  | "rainbow";
+  | "rainbow"
+  | "clouds"
+  | "storm";
 
 export type AvatarDecorationOption = {
   id: AvatarDecorationId;
@@ -33,6 +35,8 @@ export const AVATAR_DECORATIONS: AvatarDecorationOption[] = [
   { id: "kitty", name: "Kitty", colors: ["#f9a8d4", "#f0abfc"] },
   { id: "sparkle", name: "Sparkle Pop", colors: ["#fde68a", "#93c5fd"] },
   { id: "rainbow", name: "Rainbow Cloud", colors: ["#fb7185", "#67e8f9"] },
+  { id: "clouds", name: "Cloud Hug", colors: ["#e0f2fe", "#fce7f3"] },
+  { id: "storm", name: "Storm Ring", colors: ["#93c5fd", "#fde047"] },
 ];
 
 export const getAvatarDecoration = (value?: string | null): AvatarDecorationOption => {
@@ -289,6 +293,58 @@ export function AvatarDecoration({
     );
   }
 
+  if (decoration.id === "clouds") {
+    return (
+      <View pointerEvents="none" style={[styles.wrap, { width: size, height: size }]}>
+        <Animated.View style={[styles.cloudFrameGlow, { opacity: twinkleOpacity, transform: [{ scale: pulseScale }] }]} />
+        <Animated.View style={[styles.cloudFrameCluster, styles.cloudFrameTop, { transform: [{ translateY: softBob }, { scale: pulseScale }] }]}>
+          <View style={[styles.cloudFramePuff, styles.cloudFramePuffLarge, { backgroundColor: decoration.colors[0] }]} />
+          <View style={[styles.cloudFramePuff, styles.cloudFramePuffMid, { backgroundColor: "#f8fafc" }]} />
+          <View style={[styles.cloudFramePuff, styles.cloudFramePuffSmall, { backgroundColor: decoration.colors[1] }]} />
+        </Animated.View>
+        <Animated.View style={[styles.cloudFrameCluster, styles.cloudFrameLeft, { transform: [{ translateY: softBob }, { scale: twinkleScale }] }]}>
+          <View style={[styles.cloudFramePuff, styles.cloudFramePuffLarge, { backgroundColor: "#f8fafc" }]} />
+          <View style={[styles.cloudFramePuff, styles.cloudFramePuffMid, { backgroundColor: decoration.colors[0] }]} />
+          <View style={[styles.cloudFramePuff, styles.cloudFramePuffSmall, { backgroundColor: decoration.colors[1] }]} />
+        </Animated.View>
+        <Animated.View style={[styles.cloudFrameCluster, styles.cloudFrameRight, { transform: [{ translateY: softBob }, { scale: pulseScale }] }]}>
+          <View style={[styles.cloudFramePuff, styles.cloudFramePuffLarge, { backgroundColor: decoration.colors[1] }]} />
+          <View style={[styles.cloudFramePuff, styles.cloudFramePuffMid, { backgroundColor: "#f8fafc" }]} />
+          <View style={[styles.cloudFramePuff, styles.cloudFramePuffSmall, { backgroundColor: decoration.colors[0] }]} />
+        </Animated.View>
+        <Animated.View style={[styles.cloudFrameCluster, styles.cloudFrameBottom, { opacity: flickerOpacity, transform: [{ translateY: softBob }, { scale: pulseScale }] }]}>
+          <View style={[styles.cloudFramePuff, styles.cloudFramePuffLarge, { backgroundColor: "#f8fafc" }]} />
+          <View style={[styles.cloudFramePuff, styles.cloudFramePuffMid, { backgroundColor: decoration.colors[1] }]} />
+          <View style={[styles.cloudFramePuff, styles.cloudFramePuffSmall, { backgroundColor: decoration.colors[0] }]} />
+        </Animated.View>
+      </View>
+    );
+  }
+
+  if (decoration.id === "storm") {
+    return (
+      <View pointerEvents="none" style={[styles.wrap, { width: size, height: size }]}>
+        <Animated.View style={[styles.stormRing, { borderColor: decoration.colors[0], opacity: flickerOpacity, transform: [{ scale: pulseScale }] }]} />
+        <Animated.View style={[styles.stormCloud, { transform: [{ translateY: softBob }, { scale: pulseScale }] }]}>
+          <View style={[styles.stormCloudPuff, styles.stormCloudPuffOne]} />
+          <View style={[styles.stormCloudPuff, styles.stormCloudPuffTwo]} />
+          <View style={[styles.stormCloudPuff, styles.stormCloudPuffThree]} />
+        </Animated.View>
+        <Animated.View style={[styles.raindrop, styles.raindropOne, { backgroundColor: decoration.colors[0], opacity: twinkleOpacity, transform: [{ translateY: softBob }] }]} />
+        <Animated.View style={[styles.raindrop, styles.raindropTwo, { backgroundColor: "#bfdbfe", opacity: flickerOpacity, transform: [{ translateY: softBob }] }]} />
+        <Animated.View style={[styles.raindrop, styles.raindropThree, { backgroundColor: decoration.colors[0], opacity: twinkleOpacity, transform: [{ translateY: softBob }] }]} />
+        <Animated.View style={[styles.lightningBolt, styles.lightningLeft, { opacity: flickerOpacity, transform: [{ scale: flickerScale }, { rotate: "-12deg" }] }]}>
+          <View style={[styles.lightningPart, styles.lightningPartTop, { backgroundColor: decoration.colors[1] }]} />
+          <View style={[styles.lightningPart, styles.lightningPartBottom, { backgroundColor: decoration.colors[1] }]} />
+        </Animated.View>
+        <Animated.View style={[styles.lightningBolt, styles.lightningRight, { opacity: twinkleOpacity, transform: [{ scale: twinkleScale }, { rotate: "14deg" }] }]}>
+          <View style={[styles.lightningPart, styles.lightningPartTop, { backgroundColor: decoration.colors[1] }]} />
+          <View style={[styles.lightningPart, styles.lightningPartBottom, { backgroundColor: decoration.colors[1] }]} />
+        </Animated.View>
+      </View>
+    );
+  }
+
   if (decoration.id === "rainbow") {
     const rainbowColors: [string, string, string, string, string, string] = ["#fb7185", "#fdba74", "#fde68a", "#86efac", "#67e8f9", "#a78bfa"];
 
@@ -539,6 +595,127 @@ const styles = StyleSheet.create({
   sparkleTop: { top: 0, right: 15 },
   sparkleRight: { right: 1, bottom: 17 },
   sparkleLeft: { left: 5, bottom: 9 },
+  cloudFrameGlow: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 999,
+    borderWidth: 2,
+    borderColor: "rgba(255,255,255,0.36)",
+    shadowColor: "#e0f2fe",
+    shadowOpacity: 0.62,
+    shadowRadius: 12,
+  },
+  cloudFrameCluster: {
+    position: "absolute",
+    width: "48%",
+    height: "28%",
+  },
+  cloudFrameTop: { top: -9, left: "26%" },
+  cloudFrameLeft: { left: -9, top: "40%", opacity: 0.92 },
+  cloudFrameRight: { right: -10, top: "34%", opacity: 0.92 },
+  cloudFrameBottom: { bottom: -10, left: "25%", opacity: 0.88 },
+  cloudFramePuff: {
+    position: "absolute",
+    borderRadius: 999,
+    shadowColor: "#fff",
+    shadowOpacity: 0.6,
+    shadowRadius: 6,
+  },
+  cloudFramePuffLarge: {
+    width: "58%",
+    height: "90%",
+    left: 0,
+    bottom: 0,
+  },
+  cloudFramePuffMid: {
+    width: "54%",
+    height: "76%",
+    left: "28%",
+    bottom: "9%",
+  },
+  cloudFramePuffSmall: {
+    width: "38%",
+    height: "58%",
+    right: 0,
+    bottom: 0,
+  },
+  stormRing: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 999,
+    borderWidth: 2,
+    borderLeftColor: "transparent",
+    borderRightColor: "transparent",
+  },
+  stormCloud: {
+    position: "absolute",
+    top: -14,
+    width: "72%",
+    height: "34%",
+  },
+  stormCloudPuff: {
+    position: "absolute",
+    borderRadius: 999,
+    backgroundColor: "#cbd5e1",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.48)",
+    shadowColor: "#bfdbfe",
+    shadowOpacity: 0.48,
+    shadowRadius: 8,
+  },
+  stormCloudPuffOne: {
+    width: "42%",
+    height: "72%",
+    left: "3%",
+    bottom: 0,
+  },
+  stormCloudPuffTwo: {
+    width: "52%",
+    height: "92%",
+    left: "25%",
+    bottom: "5%",
+    backgroundColor: "#e2e8f0",
+  },
+  stormCloudPuffThree: {
+    width: "38%",
+    height: "68%",
+    right: "4%",
+    bottom: 0,
+  },
+  raindrop: {
+    position: "absolute",
+    width: 4,
+    height: 13,
+    borderRadius: 999,
+    transform: [{ rotate: "16deg" }],
+  },
+  raindropOne: { top: "14%", left: "28%" },
+  raindropTwo: { top: "17%", left: "48%" },
+  raindropThree: { top: "15%", right: "28%" },
+  lightningBolt: {
+    position: "absolute",
+    width: 18,
+    height: 30,
+  },
+  lightningLeft: { left: 1, top: "20%" },
+  lightningRight: { right: 0, top: "23%" },
+  lightningPart: {
+    position: "absolute",
+    width: 8,
+    height: 18,
+    borderRadius: 2,
+    shadowColor: "#fde047",
+    shadowOpacity: 0.7,
+    shadowRadius: 8,
+  },
+  lightningPartTop: {
+    top: 0,
+    left: 7,
+    transform: [{ rotate: "28deg" }],
+  },
+  lightningPartBottom: {
+    top: 12,
+    left: 3,
+    transform: [{ rotate: "-28deg" }],
+  },
   rainbowHalo: {
     ...StyleSheet.absoluteFillObject,
     borderRadius: 999,

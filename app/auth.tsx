@@ -1,7 +1,7 @@
 import type { Session } from '@supabase/supabase-js'
 import { LinearGradient } from 'expo-linear-gradient'
 import { useRouter } from 'expo-router'
-import { CheckCircle, Eye, EyeOff, LockKeyhole, Mail } from 'lucide-react-native'
+import { Check, CheckCircle, Eye, EyeOff, LockKeyhole, Mail } from 'lucide-react-native'
 import { useEffect, useRef, useState } from 'react'
 import {
   ActivityIndicator,
@@ -9,6 +9,7 @@ import {
   Animated,
   Dimensions,
   Easing,
+  Image,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
@@ -23,6 +24,7 @@ import {
   View,
 } from 'react-native'
 import { THEME_PALETTES } from '../lib/app-theme'
+import { getRememberMePreference, setRememberMePreference } from '../lib/auth-preferences'
 import { supabase } from '../lib/supabaseClient'
 
 const { width, height } = Dimensions.get('window')
@@ -65,12 +67,14 @@ export default function AuthScreen() {
   const [password, setPassword] = useState('')
   const [sessionEmail, setSessionEmail] = useState<string | null>(null)
   const [welcomeName, setWelcomeName] = useState('')
+  const [welcomeAvatarUrl, setWelcomeAvatarUrl] = useState('')
   const [introMessage, setIntroMessage] = useState(() => pickRandomMessage(INTRO_MESSAGES))
   const [introBottomMessage, setIntroBottomMessage] = useState(() => pickRandomMessage(INTRO_BOTTOM_MESSAGES))
   const [showIntro, setShowIntro] = useState(true)
   const [entryPhase, setEntryPhase] = useState<'idle' | 'success' | 'loading'>('idle')
   const [loading, setLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
+  const [rememberMe, setRememberMe] = useState(false)
   const entryTimers = useRef<ReturnType<typeof setTimeout>[]>([])
   const introTimers = useRef<ReturnType<typeof setTimeout>[]>([])
 
@@ -124,6 +128,12 @@ export default function AuthScreen() {
       introTimerList.forEach((timer) => clearTimeout(timer))
     }
   }, [fadeAnim, scaleAnim, slideAnim, titleSlideAnim])
+
+  useEffect(() => {
+    getRememberMePreference()
+      .then(setRememberMe)
+      .catch(() => setRememberMe(false))
+  }, [])
 
   useEffect(() => {
     if (sessionEmail) {
@@ -346,19 +356,17 @@ export default function AuthScreen() {
     return true
   }
 
-  const resolveWelcomeName = async (userId: string, emailValue: string) => {
+  const resolveWelcomeProfile = async (userId: string, emailValue: string) => {
     const { data } = await supabase
       .from('profiles')
-      .select('full_name, username')
+      .select('full_name, username, avatar_url')
       .eq('id', userId)
       .single()
 
-    return (
-      data?.username ||
-      data?.full_name ||
-      emailValue.split('@')[0] ||
-      'friend'
-    )
+    return {
+      name: data?.username || data?.full_name || emailValue.split('@')[0] || 'friend',
+      avatarUrl: data?.avatar_url || '',
+    }
   }
 
   const queueTimer = (callback: () => void, delay: number) => {
@@ -366,8 +374,9 @@ export default function AuthScreen() {
     entryTimers.current.push(timer)
   }
 
-  const playWelcomeAnimation = (name: string) => {
+  const playWelcomeAnimation = (name: string, avatarUrl = '') => {
     setWelcomeName(name)
+    setWelcomeAvatarUrl(avatarUrl)
     setEntryPhase('success')
     authExitOpacity.setValue(1)
     authExitScale.setValue(1)
@@ -487,17 +496,19 @@ export default function AuthScreen() {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password })
     setLoading(false)
     if (error) return Alert.alert('Login error', error.message)
+    await setRememberMePreference(rememberMe)
 
     const user = data.user
-    const name = user
-      ? await resolveWelcomeName(user.id, user.email ?? email)
-      : email.split('@')[0]
+    const profile = user
+      ? await resolveWelcomeProfile(user.id, user.email ?? email)
+      : { name: email.split('@')[0], avatarUrl: '' }
 
-    playWelcomeAnimation(name)
+    playWelcomeAnimation(profile.name, profile.avatarUrl)
   }
 
   const signOut = async () => {
     setLoading(true)
+    await setRememberMePreference(false)
     await supabase.auth.signOut()
     setLoading(false)
   }
@@ -641,8 +652,19 @@ export default function AuthScreen() {
                     </View>
                   </Animated.View>
 
-                  {/* Forgot password */}
-                  <View style={styles.forgotPasswordContainer}>
+                  <View style={styles.loginOptionsRow}>
+                    <TouchableOpacity
+                      style={styles.rememberRow}
+                      onPress={() => setRememberMe((value) => !value)}
+                      activeOpacity={0.82}
+                      disabled={loading}
+                    >
+                      <View style={[styles.rememberBox, rememberMe && styles.rememberBoxActive]}>
+                        {rememberMe ? <Check size={12} color="#fff" strokeWidth={3} /> : null}
+                      </View>
+                      <Text style={styles.rememberTitle}>Remember me</Text>
+                    </TouchableOpacity>
+
                     <TouchableOpacity style={styles.forgotPassword} onPress={() => router.push('/reset-password')}>
                       <Text style={styles.forgotPasswordText}>Forgot password?</Text>
                     </TouchableOpacity>
@@ -764,9 +786,13 @@ export default function AuthScreen() {
                 end={{ x: 1, y: 1 }}
                 style={styles.successStageEmojiWrap}
               >
-                <Text style={styles.successStageEmoji}>:)</Text>
+                {welcomeAvatarUrl ? (
+                  <Image source={{ uri: welcomeAvatarUrl }} style={styles.welcomeAvatarImage} resizeMode="cover" />
+                ) : (
+                  <Text style={styles.successStageEmoji}>{welcomeName ? welcomeName.charAt(0).toUpperCase() : 'W'}</Text>
+                )}
               </LinearGradient>
-              <Text style={styles.successStageTitle}>Successful</Text>
+              <Text style={styles.successStageTitle}>Welcome back</Text>
               <Text style={styles.successStageSubtitle}>
                 You are signed in, {welcomeName}.
               </Text>
@@ -797,9 +823,13 @@ export default function AuthScreen() {
                   end={{ x: 1, y: 1 }}
                   style={styles.welcomeBadge}
                 >
-                  <Text style={styles.welcomeBadgeText}>
-                    {welcomeName ? welcomeName.charAt(0).toUpperCase() : 'W'}
-                  </Text>
+                  {welcomeAvatarUrl ? (
+                    <Image source={{ uri: welcomeAvatarUrl }} style={styles.welcomeAvatarImage} resizeMode="cover" />
+                  ) : (
+                    <Text style={styles.welcomeBadgeText}>
+                      {welcomeName ? welcomeName.charAt(0).toUpperCase() : 'W'}
+                    </Text>
+                  )}
                 </LinearGradient>
                 <View style={styles.loadingStageTextWrap}>
                   <Text style={styles.welcomeEyebrow}>Welcome back</Text>
@@ -945,9 +975,13 @@ const createStyles = (C: typeof THEME_PALETTES.dark) => StyleSheet.create({
   input: { flex: 1, paddingVertical: 14, fontSize: 16, color: C.textPrimary },
   passwordInput: { paddingRight: 50 },
   eyeButton: { position: 'absolute', right: 12, padding: 8 },
+  loginOptionsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: -2, marginBottom: 16 },
+  rememberRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4, paddingRight: 8 },
+  rememberBox: { width: 18, height: 18, borderRadius: 6, borderWidth: 1, borderColor: C.mode === 'dark' ? 'rgba(255,255,255,0.22)' : 'rgba(24,24,38,0.16)', backgroundColor: C.mode === 'dark' ? 'rgba(255,255,255,0.055)' : 'rgba(255,255,255,0.72)', alignItems: 'center', justifyContent: 'center' },
+  rememberBoxActive: { backgroundColor: C.accent, borderColor: C.accentBright },
+  rememberTitle: { color: C.textSecondary, fontSize: 12, fontWeight: '700' },
 
   // Forgot
-  forgotPasswordContainer: { alignItems: 'flex-end', marginBottom: 16 },
   forgotPassword: { padding: 4 },
   forgotPasswordText: { color: C.blue, fontSize: 13, fontWeight: '600' },
 
@@ -1001,6 +1035,7 @@ const createStyles = (C: typeof THEME_PALETTES.dark) => StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 18,
+    overflow: 'hidden',
   },
   successStageEmoji: {
     color: '#FFFFFF',
@@ -1058,6 +1093,11 @@ const createStyles = (C: typeof THEME_PALETTES.dark) => StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 18,
+    overflow: 'hidden',
+  },
+  welcomeAvatarImage: {
+    width: '100%',
+    height: '100%',
   },
   welcomeBadgeText: {
     color: '#FFFFFF',

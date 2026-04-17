@@ -291,9 +291,13 @@ export default function SettingsScreen() {
               end={{ x: 1, y: 1 }}
               style={styles.logoutFarewellBadge}
             >
-              <Text style={styles.logoutFarewellBadgeText}>
-                {(profileName || "S").charAt(0).toUpperCase()}
-              </Text>
+              {profileAvatarUrl ? (
+                <Image source={{ uri: profileAvatarUrl }} style={styles.logoutFarewellAvatar} resizeMode="cover" />
+              ) : (
+                <Text style={styles.logoutFarewellBadgeText}>
+                  {(profileName || "S").charAt(0).toUpperCase()}
+                </Text>
+              )}
             </LinearGradient>
             <Text style={styles.logoutFarewellEyebrow}>Signed out</Text>
             <Text style={styles.logoutFarewellTitle}>See you soon, {profileName}</Text>
@@ -403,7 +407,8 @@ const createStyles = (C: ReturnType<typeof useAppTheme>["palette"]) => StyleShee
   logoutBackdropGlow: { position: "absolute", width: 300, height: 300, borderRadius: 150, backgroundColor: `${C.red}2e` },
   logoutBackdropGlowSecondary: { position: "absolute", width: 180, height: 180, borderRadius: 90, backgroundColor: `${C.accent}24`, bottom: "35%" },
   logoutFarewellCard: { width: "100%", maxWidth: 332, borderRadius: 30, paddingHorizontal: 24, paddingVertical: 30, backgroundColor: C.mode === "dark" ? `${C.cardBright}f5` : "rgba(255,255,255,0.96)", borderWidth: 1, borderColor: C.border, alignItems: "center" },
-  logoutFarewellBadge: { width: 72, height: 72, borderRadius: 36, alignItems: "center", justifyContent: "center", marginBottom: 18 },
+  logoutFarewellBadge: { width: 72, height: 72, borderRadius: 36, alignItems: "center", justifyContent: "center", marginBottom: 18, overflow: "hidden" },
+  logoutFarewellAvatar: { width: "100%", height: "100%" },
   logoutFarewellBadgeText: { color: "#fff", fontSize: 30, fontWeight: "900" },
   logoutFarewellEyebrow: { color: C.red, fontSize: 12, fontWeight: "700", textTransform: "uppercase", letterSpacing: 1.1, marginBottom: 10 },
   logoutFarewellTitle: { color: C.textPrimary, fontSize: 28, fontWeight: "800", letterSpacing: -0.8, textAlign: "center", marginBottom: 8 },
