@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { DarkTheme, DefaultTheme, Theme } from "@react-navigation/native";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { supabase } from "./supabaseClient";
 
 export type ThemeMode = "dark" | "light" | "aurora" | "candy" | "mint" | "ruby";
 export type ThemeAppearance = "dark" | "light";
@@ -42,6 +43,8 @@ export type AppPalette = {
 
 const STORAGE_KEY = "splititup-theme-mode";
 const BACKGROUND_STORAGE_KEY = "splititup-background-mode";
+const userThemeKey = (userId: string) => `${STORAGE_KEY}:${userId}`;
+const userBackgroundKey = (userId: string) => `${BACKGROUND_STORAGE_KEY}:${userId}`;
 
 export type ThemeOption = {
   id: ThemeMode;
@@ -312,6 +315,10 @@ type AppThemeContextValue = {
 
 const AppThemeContext = createContext<AppThemeContextValue | null>(null);
 
+const isThemeMode = (value?: string | null): value is ThemeMode => !!value && value in THEME_PALETTES;
+const isBackgroundMode = (value?: string | null): value is BackgroundMode =>
+  !!value && APP_BACKGROUND_OPTIONS.some((option) => option.id === value);
+
 function buildNavigationTheme(palette: AppPalette): Theme {
   const base = palette.mode === "dark" ? DarkTheme : DefaultTheme;
 
@@ -332,33 +339,76 @@ function buildNavigationTheme(palette: AppPalette): Theme {
 export function AppThemeProvider({ children }: { children: React.ReactNode }) {
   const [mode, setModeState] = useState<ThemeMode>("dark");
   const [backgroundMode, setBackgroundModeState] = useState<BackgroundMode>("default");
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   useEffect(() => {
-    AsyncStorage.multiGet([STORAGE_KEY, BACKGROUND_STORAGE_KEY])
-      .then((storedValues) => {
-        const storedTheme = storedValues.find(([key]) => key === STORAGE_KEY)?.[1];
-        const storedBackground = storedValues.find(([key]) => key === BACKGROUND_STORAGE_KEY)?.[1];
+    let active = true;
 
-        if (storedTheme && storedTheme in THEME_PALETTES) {
-          setModeState(storedTheme as ThemeMode);
-        }
+    const loadUserAppearance = async (userId?: string | null) => {
+      if (!active) return;
 
-        if (storedBackground && APP_BACKGROUND_OPTIONS.some((option) => option.id === storedBackground)) {
-          setBackgroundModeState(storedBackground as BackgroundMode);
-        }
-      })
-      .catch(() => {});
+      if (!userId) {
+        setCurrentUserId(null);
+        setModeState("dark");
+        setBackgroundModeState("default");
+        return;
+      }
+
+      setCurrentUserId(userId);
+
+      const storedValues = await AsyncStorage.multiGet([
+        userThemeKey(userId),
+        userBackgroundKey(userId),
+      ]).catch(() => []);
+
+      if (!active) return;
+
+      const storedTheme = storedValues.find(([key]) => key === userThemeKey(userId))?.[1];
+      const storedBackground = storedValues.find(([key]) => key === userBackgroundKey(userId))?.[1];
+
+      const nextTheme = isThemeMode(storedTheme) ? storedTheme : "dark";
+      const nextBackground = isBackgroundMode(storedBackground) ? storedBackground : "default";
+
+      setModeState(nextTheme);
+      setBackgroundModeState(nextBackground);
+
+      await AsyncStorage.multiSet([
+        [userThemeKey(userId), nextTheme],
+        [userBackgroundKey(userId), nextBackground],
+      ]).catch(() => {});
+    };
+
+    supabase.auth.getSession().then(({ data }) => {
+      loadUserAppearance(data.session?.user?.id);
+    });
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      loadUserAppearance(session?.user?.id);
+    });
+
+    return () => {
+      active = false;
+      authListener.subscription.unsubscribe();
+    };
   }, []);
 
   const setMode = useCallback((nextMode: ThemeMode) => {
     setModeState(nextMode);
+    if (currentUserId) {
+      AsyncStorage.setItem(userThemeKey(currentUserId), nextMode).catch(() => {});
+      return;
+    }
     AsyncStorage.setItem(STORAGE_KEY, nextMode).catch(() => {});
-  }, []);
+  }, [currentUserId]);
 
   const setBackgroundMode = useCallback((nextMode: BackgroundMode) => {
     setBackgroundModeState(nextMode);
+    if (currentUserId) {
+      AsyncStorage.setItem(userBackgroundKey(currentUserId), nextMode).catch(() => {});
+      return;
+    }
     AsyncStorage.setItem(BACKGROUND_STORAGE_KEY, nextMode).catch(() => {});
-  }, []);
+  }, [currentUserId]);
 
   const value = useMemo(() => {
     const palette = THEME_PALETTES[mode];

@@ -17,6 +17,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 type InboxSection = "friends" | "money";
+type FriendRequestTab = "incoming" | "sent";
 
 // ─── Section spring entrance ────────────────────────────────────────────────
 
@@ -99,7 +100,9 @@ export default function InboxScreen() {
   const styles = createStyles(C);
 
   const [activeSection, setActiveSection] = useState<InboxSection>("friends");
+  const [activeFriendTab, setActiveFriendTab] = useState<FriendRequestTab>("incoming");
   const [friendRequests, setFriendRequests] = useState<any[]>([]);
+  const [sentFriendRequests, setSentFriendRequests] = useState<any[]>([]);
   const [moneyRequests, setMoneyRequests] = useState<any[]>([]);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -134,6 +137,28 @@ export default function InboxScreen() {
     );
   }, []);
 
+  const loadSentFriendRequests = useCallback(async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const currentUserId = session?.user?.id;
+    if (!currentUserId) return;
+
+    const { data, error } = await supabase
+      .from("friend_requests")
+      .select(`id, addressee_id, addressee:profiles!addressee_id ( full_name, username )`)
+      .eq("requester_id", currentUserId)
+      .eq("status", "pending");
+
+    if (error) { console.error("Error loading sent friend requests:", error); return; }
+
+    setSentFriendRequests(
+      data?.map((r: any) => ({
+        id: r.id,
+        name: r.addressee?.full_name || "Unknown User",
+        username: r.addressee?.username || "unknown",
+      })) ?? []
+    );
+  }, []);
+
   const loadMoneyRequests = useCallback(async () => {
     const { data: { session } } = await supabase.auth.getSession();
     const currentUserId = session?.user?.id;
@@ -161,9 +186,9 @@ export default function InboxScreen() {
 
   const refreshInbox = useCallback(async () => {
     setRefreshing(true);
-    try { await Promise.all([loadFriendRequests(), loadMoneyRequests()]); }
+    try { await Promise.all([loadFriendRequests(), loadSentFriendRequests(), loadMoneyRequests()]); }
     finally { setRefreshing(false); }
-  }, [loadFriendRequests, loadMoneyRequests]);
+  }, [loadFriendRequests, loadMoneyRequests, loadSentFriendRequests]);
 
   useEffect(() => {
     if (!isFocused) return;
@@ -175,7 +200,7 @@ export default function InboxScreen() {
     Animated.timing(sectionOpacity, {
       toValue: 1, duration: 220, easing: Easing.out(Easing.cubic), useNativeDriver: true,
     }).start();
-  }, [activeSection, sectionOpacity]);
+  }, [activeSection, activeFriendTab, sectionOpacity]);
 
   useEffect(() => {
     if (!isFocused) return;
@@ -189,12 +214,13 @@ export default function InboxScreen() {
       channel = supabase
         .channel(`inbox-${uid}`)
         .on("postgres_changes", { event: "*", schema: "public", table: "friend_requests", filter: `addressee_id=eq.${uid}` }, loadFriendRequests)
+        .on("postgres_changes", { event: "*", schema: "public", table: "friend_requests", filter: `requester_id=eq.${uid}` }, loadSentFriendRequests)
         .on("postgres_changes", { event: "*", schema: "public", table: "money_requests", filter: `owner_id=eq.${uid}` }, loadMoneyRequests)
         .subscribe();
     });
 
     return () => { active = false; if (channel) supabase.removeChannel(channel); };
-  }, [isFocused, loadFriendRequests, loadMoneyRequests]);
+  }, [isFocused, loadFriendRequests, loadMoneyRequests, loadSentFriendRequests]);
 
   const handleAcceptFriendRequest = async (requestId: string) => {
     const { data: request, error: fetchError } = await supabase.from("friend_requests").select("*").eq("id", requestId).single();
@@ -206,7 +232,7 @@ export default function InboxScreen() {
       { user_id: request.addressee_id, friend_id: request.requester_id },
     ]);
     if (friendError) return console.error(friendError);
-    await loadFriendRequests();
+    await Promise.all([loadFriendRequests(), loadSentFriendRequests()]);
   };
 
   const handleDeclineFriendRequest = async (requestId: string) => {
@@ -237,7 +263,9 @@ export default function InboxScreen() {
   };
 
   const totalCount = friendRequests.length + moneyRequests.length;
+  const friendSectionCount = friendRequests.length + sentFriendRequests.length;
   const activeRequests = activeSection === "friends" ? friendRequests : moneyRequests;
+  const activeFriendRequests = activeFriendTab === "incoming" ? friendRequests : sentFriendRequests;
 
   return (
     <SafeAreaView edges={["top", "left", "right"]} style={styles.safeArea}>
@@ -289,10 +317,10 @@ export default function InboxScreen() {
           <Pressable style={[styles.optionCard, activeSection === "friends" && styles.optionCardActive]} onPress={() => setActiveSection("friends")}>
             <View style={styles.optionTop}>
               <View style={styles.optionIcon}><UserPlus size={18} color={C.accentBright} /></View>
-              {friendRequests.length > 0 ? <View style={styles.optionBadge}><Text style={styles.optionBadgeText}>{friendRequests.length}</Text></View> : null}
+              {friendSectionCount > 0 ? <View style={styles.optionBadge}><Text style={styles.optionBadgeText}>{friendSectionCount}</Text></View> : null}
             </View>
             <Text style={styles.optionTitle}>Friend Requests</Text>
-            <Text style={styles.optionSubtitle}>People who want to connect</Text>
+            <Text style={styles.optionSubtitle}>Incoming and sent pending requests</Text>
           </Pressable>
 
           <Pressable style={[styles.optionCard, activeSection === "money" && styles.optionCardActive]} onPress={() => setActiveSection("money")}>
@@ -313,39 +341,100 @@ export default function InboxScreen() {
               <Text style={styles.sectionTitle}>{activeSection === "friends" ? "Friend Requests" : "Money Requests"}</Text>
             </View>
             <View style={styles.sectionBadge}>
-              <Text style={styles.sectionBadgeText}>{activeRequests.length}</Text>
+              <Text style={styles.sectionBadgeText}>{activeSection === "friends" ? friendSectionCount : activeRequests.length}</Text>
             </View>
           </View>
 
+          {activeSection === "friends" ? (
+            <View style={styles.friendRequestSwitch}>
+              <Pressable
+                style={[styles.friendRequestSwitchButton, activeFriendTab === "incoming" && styles.friendRequestSwitchButtonActive]}
+                onPress={() => setActiveFriendTab("incoming")}
+              >
+                <Text style={[styles.friendRequestSwitchText, activeFriendTab === "incoming" && styles.friendRequestSwitchTextActive]}>
+                  Requests
+                </Text>
+                {friendRequests.length > 0 ? (
+                  <View style={styles.friendRequestSwitchBadge}>
+                    <Text style={styles.friendRequestSwitchBadgeText}>{friendRequests.length}</Text>
+                  </View>
+                ) : null}
+              </Pressable>
+              <Pressable
+                style={[styles.friendRequestSwitchButton, activeFriendTab === "sent" && styles.friendRequestSwitchButtonActive]}
+                onPress={() => setActiveFriendTab("sent")}
+              >
+                <Text style={[styles.friendRequestSwitchText, activeFriendTab === "sent" && styles.friendRequestSwitchTextActive]}>
+                  Pending Sent
+                </Text>
+                {sentFriendRequests.length > 0 ? (
+                  <View style={styles.friendRequestSwitchBadge}>
+                    <Text style={styles.friendRequestSwitchBadgeText}>{sentFriendRequests.length}</Text>
+                  </View>
+                ) : null}
+              </Pressable>
+            </View>
+          ) : null}
+
           <Animated.View style={{ opacity: sectionOpacity, transform: [{ translateY: sectionTranslate }] }}>
-            {activeRequests.length === 0 ? (
+            {activeSection === "friends" && activeFriendRequests.length === 0 ? (
               <View style={styles.emptyState}>
                 <Inbox size={28} color={C.textMuted} />
-                <Text style={styles.emptyTitle}>{activeSection === "friends" ? "No friend requests" : "No money requests"}</Text>
-                <Text style={styles.emptySubtitle}>{activeSection === "friends" ? "New friend requests will show up here." : "Payment requests will show up here."}</Text>
+                <Text style={styles.emptyTitle}>{activeFriendTab === "incoming" ? "No requests right now" : "No pending sent requests"}</Text>
+                <Text style={styles.emptySubtitle}>
+                  {activeFriendTab === "incoming" ? "Requests people send to you will show up here." : "Friend requests you send will stay here until they answer."}
+                </Text>
+              </View>
+            ) : activeSection === "money" && activeRequests.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Inbox size={28} color={C.textMuted} />
+                <Text style={styles.emptyTitle}>No money requests</Text>
+                <Text style={styles.emptySubtitle}>Payment requests will show up here.</Text>
               </View>
             ) : activeSection === "friends" ? (
-              friendRequests.map((request) => (
-                <View key={request.id} style={styles.requestCard}>
-                  <View style={styles.requestInfo}>
-                    <View style={styles.friendAvatar}>
-                      <Text style={styles.avatarText}>{request.name ? request.name.charAt(0).toUpperCase() : "?"}</Text>
+              <>
+                {activeFriendTab === "incoming" ? (
+                  friendRequests.map((request) => (
+                    <View key={request.id} style={styles.requestCard}>
+                      <View style={styles.requestInfo}>
+                        <View style={styles.friendAvatar}>
+                          <Text style={styles.avatarText}>{request.name ? request.name.charAt(0).toUpperCase() : "?"}</Text>
+                        </View>
+                        <View style={styles.requestBody}>
+                          <Text style={styles.requestName}>{request.name}</Text>
+                          <Text style={styles.requestMeta}>@{request.username}</Text>
+                        </View>
+                      </View>
+                      <View style={styles.requestActions}>
+                        <Pressable style={styles.acceptButton} onPress={() => handleAcceptFriendRequest(request.id)}>
+                          <Check size={15} color="#fff" /><Text style={styles.requestButtonText}>Accept</Text>
+                        </Pressable>
+                        <Pressable style={styles.declineButton} onPress={() => handleDeclineFriendRequest(request.id)}>
+                          <X size={15} color="#fff" /><Text style={styles.requestButtonText}>Decline</Text>
+                        </Pressable>
+                      </View>
                     </View>
-                    <View style={styles.requestBody}>
-                      <Text style={styles.requestName}>{request.name}</Text>
-                      <Text style={styles.requestMeta}>@{request.username}</Text>
+                  ))
+                ) : (
+                  sentFriendRequests.map((request) => (
+                    <View key={request.id} style={styles.requestCard}>
+                      <View style={[styles.requestInfo, styles.pendingSentInfo]}>
+                        <View style={styles.friendAvatar}>
+                          <Text style={styles.avatarText}>{request.name ? request.name.charAt(0).toUpperCase() : "?"}</Text>
+                        </View>
+                        <View style={styles.requestBody}>
+                          <Text style={styles.requestName}>{request.name}</Text>
+                          <Text style={styles.requestMeta}>@{request.username}</Text>
+                          <Text style={styles.pendingText}>Waiting for them to accept</Text>
+                        </View>
+                        <View style={styles.pendingPill}>
+                          <Text style={styles.pendingPillText}>Pending</Text>
+                        </View>
+                      </View>
                     </View>
-                  </View>
-                  <View style={styles.requestActions}>
-                    <Pressable style={styles.acceptButton} onPress={() => handleAcceptFriendRequest(request.id)}>
-                      <Check size={15} color="#fff" /><Text style={styles.requestButtonText}>Accept</Text>
-                    </Pressable>
-                    <Pressable style={styles.declineButton} onPress={() => handleDeclineFriendRequest(request.id)}>
-                      <X size={15} color="#fff" /><Text style={styles.requestButtonText}>Decline</Text>
-                    </Pressable>
-                  </View>
-                </View>
-              ))
+                  ))
+                )}
+              </>
             ) : (
               moneyRequests.map((request) => (
                 <View key={request.id} style={styles.requestCard}>
@@ -412,17 +501,28 @@ const createStyles = (C: ReturnType<typeof useAppTheme>["palette"]) =>
     sectionTitle: { fontSize: 20, fontWeight: "800", color: C.textPrimary, letterSpacing: -0.4 },
     sectionBadge: { backgroundColor: C.surface, borderRadius: 999, borderWidth: 1, borderColor: C.border, paddingHorizontal: 10, paddingVertical: 6 },
     sectionBadgeText: { color: C.textSecondary, fontSize: 11, fontWeight: "700" },
+    friendRequestSwitch: { flexDirection: "row", gap: 8, backgroundColor: C.surface, borderRadius: 16, borderWidth: 1, borderColor: C.border, padding: 5, marginBottom: 14 },
+    friendRequestSwitchButton: { flex: 1, minHeight: 42, borderRadius: 12, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7, paddingHorizontal: 8 },
+    friendRequestSwitchButtonActive: { backgroundColor: C.accent, shadowColor: C.accent, shadowOpacity: 0.26, shadowRadius: 10, shadowOffset: { width: 0, height: 5 }, elevation: 3 },
+    friendRequestSwitchText: { color: C.textSecondary, fontSize: 12, fontWeight: "800" },
+    friendRequestSwitchTextActive: { color: "#fff" },
+    friendRequestSwitchBadge: { minWidth: 20, height: 20, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: C.red, paddingHorizontal: 6 },
+    friendRequestSwitchBadgeText: { color: "#fff", fontSize: 10, fontWeight: "900" },
     emptyState: { backgroundColor: C.surface, borderRadius: 16, borderWidth: 1, borderColor: C.border, paddingVertical: 28, paddingHorizontal: 16, alignItems: "center" },
     emptyTitle: { fontSize: 14, fontWeight: "800", color: C.textPrimary, textAlign: "center", marginTop: 10 },
     emptySubtitle: { fontSize: 12, color: C.textSecondary, textAlign: "center", marginTop: 6, lineHeight: 18 },
     requestCard: { backgroundColor: C.surface, borderRadius: 16, borderWidth: 1, borderColor: C.border, padding: 12, marginBottom: 10 },
     requestInfo: { flexDirection: "row", alignItems: "center", marginBottom: 12, gap: 12 },
+    pendingSentInfo: { marginBottom: 0 },
     friendAvatar: { width: 42, height: 42, borderRadius: 21, backgroundColor: C.accentDim, borderWidth: 1, borderColor: `${C.accent}44`, alignItems: "center", justifyContent: "center" },
     moneyAvatar: { width: 42, height: 42, borderRadius: 21, backgroundColor: C.greenDim, borderWidth: 1, borderColor: `${C.green}44`, alignItems: "center", justifyContent: "center" },
     avatarText: { color: C.accentBright, fontWeight: "800", fontSize: 15 },
     requestBody: { flex: 1 },
     requestName: { fontSize: 14, fontWeight: "800", color: C.textPrimary },
     requestMeta: { fontSize: 12, color: C.textSecondary, marginTop: 2 },
+    pendingText: { fontSize: 11, color: C.amber, fontWeight: "700", marginTop: 5 },
+    pendingPill: { borderRadius: 999, backgroundColor: C.amberDim, borderWidth: 1, borderColor: `${C.amber}44`, paddingHorizontal: 10, paddingVertical: 6 },
+    pendingPillText: { color: C.amber, fontSize: 11, fontWeight: "800" },
     moneyText: { fontSize: 11, color: C.green, fontWeight: "700", marginTop: 5 },
     requestActions: { flexDirection: "row", gap: 8 },
     acceptButton: { flex: 1, flexDirection: "row", gap: 6, alignItems: "center", justifyContent: "center", backgroundColor: C.green, borderRadius: 12, paddingVertical: 10 },

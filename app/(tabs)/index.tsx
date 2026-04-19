@@ -14,6 +14,7 @@ import {
   Animated,
   AppState,
   Easing,
+  Image,
   Keyboard,
   KeyboardAvoidingView,
   LayoutAnimation,
@@ -34,7 +35,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 // ── Palette ───────────────────────────────────────────────────────────────────
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-type Friend = { id: string; name: string; balance: number };
+type Friend = { id: string; name: string; balance: number; avatarUrl?: string };
 type Split = {
   id: string;
   title: string;
@@ -43,12 +44,13 @@ type Split = {
   creator_id: string;
   creatorUsername: string;
   creatorName: string;
+  creatorAvatarUrl: string;
   myBalance: number;
   friends: Friend[];
   paymentRequested?: boolean;
 };
-type EditableMember = { id: string; full_name: string; username: string; shareAmount: number; shareAmountInput: string };
-type AvailableFriend = { id: string; full_name: string; username: string };
+type EditableMember = { id: string; full_name: string; username: string; avatarUrl?: string; shareAmount: number; shareAmountInput: string };
+type AvailableFriend = { id: string; full_name: string; username: string; avatarUrl?: string };
 type SplitFilter = "all" | "owe" | "owed" | "settled";
 type HomePalette = typeof THEME_PALETTES.dark;
 type HomeStyles = ReturnType<typeof createStyles>;
@@ -276,6 +278,13 @@ function SplitCard({ split, currentUserId, entryDelay, isFocused, onOpenDetails,
               <View style={styles.friendPills}>
                 {split.friends.slice(0, MAX_BADGES).map((friend) => (
                   <View key={friend.id} style={styles.friendPill}>
+                    <View style={styles.friendPillAvatar}>
+                      {friend.avatarUrl ? (
+                        <Image source={{ uri: friend.avatarUrl }} style={styles.avatarImage} resizeMode="cover" />
+                      ) : (
+                        <Text style={styles.friendPillAvatarText}>{friend.name.charAt(0).toUpperCase()}</Text>
+                      )}
+                    </View>
                     <Text style={styles.friendPillText}>{friend.name}</Text>
                   </View>
                 ))}
@@ -354,7 +363,7 @@ export default function HomeScreen() {
       .from("splits")
       .select(`id, title, total_amount, created_at, creator_id,
         my_membership:split_members!inner( profile_id, share_amount ),
-        all_members:split_members( profile_id, share_amount, profiles( id, full_name ) )`)
+        all_members:split_members( profile_id, share_amount, profiles( id, full_name, avatar_url ) )`)
       .eq("my_membership.profile_id", user.id);
 
     if (error) { console.error("Error fetching splits:", error); setLoading(false); return; }
@@ -364,7 +373,7 @@ export default function HomeScreen() {
     const { data: creatorProfiles, error: creatorProfilesError } = creatorIds.length > 0
       ? await supabase
           .from("profiles")
-          .select("id, full_name, username")
+          .select("id, full_name, username, avatar_url")
           .in("id", creatorIds)
       : { data: [], error: null };
 
@@ -390,7 +399,12 @@ export default function HomeScreen() {
       const creatorProfile = creatorProfilesById.get(split.creator_id);
       const friends: Friend[] = (split.all_members ?? [])
         .filter((m: any) => m.profile_id !== user.id)
-        .map((m: any) => ({ id: m.profile_id, name: m.profiles?.full_name ?? "Unknown", balance: m.share_amount ?? 0 }));
+        .map((m: any) => ({
+          id: m.profile_id,
+          name: m.profiles?.full_name ?? "Unknown",
+          avatarUrl: m.profiles?.avatar_url ?? "",
+          balance: m.share_amount ?? 0,
+        }));
       const rawBalance = Number(myRow?.share_amount ?? 0);
       const myBalance = split.creator_id === user.id
         ? friends.reduce((sum, friend) => sum + Math.abs(Number(friend.balance ?? 0)), 0)
@@ -406,6 +420,7 @@ export default function HomeScreen() {
         creator_id: split.creator_id,
         creatorUsername: creatorProfile?.username ?? "",
         creatorName: creatorProfile?.full_name ?? "",
+        creatorAvatarUrl: creatorProfile?.avatar_url ?? "",
         myBalance,
         friends,
         paymentRequested: requestedSplitIds.has(split.id),
@@ -500,11 +515,11 @@ export default function HomeScreen() {
 
     try {
       const { data: memberRows, error: memberError } = await supabase
-        .from("split_members").select(`profile_id, share_amount, profiles (id, full_name, username)`).eq("split_id", selectedSplit.id);
+        .from("split_members").select(`profile_id, share_amount, profiles (id, full_name, username, avatar_url)`).eq("split_id", selectedSplit.id);
       if (memberError) console.error("Error fetching split members:", memberError);
 
       const { data: friendRows, error: friendError } = await supabase
-        .from("friends").select(`id, user_id, friend_id, profiles:friend_id (id, full_name, username)`).eq("user_id", user.id);
+        .from("friends").select(`id, user_id, friend_id, profiles:friend_id (id, full_name, username, avatar_url)`).eq("user_id", user.id);
       if (friendError) console.error("Error fetching friends:", friendError);
 
       const prefilledMembers: EditableMember[] = (memberRows ?? [])
@@ -512,11 +527,11 @@ export default function HomeScreen() {
         .map((m: any) => {
           const profile = m.profiles as any;
           const amount = Math.abs(Number(m.share_amount ?? 0));
-          return { id: profile?.id ?? m.profile_id, full_name: profile?.full_name ?? "Unknown", username: profile?.username ?? "", shareAmount: amount, shareAmountInput: amount.toFixed(2) };
+          return { id: profile?.id ?? m.profile_id, full_name: profile?.full_name ?? "Unknown", username: profile?.username ?? "", avatarUrl: profile?.avatar_url ?? "", shareAmount: amount, shareAmountInput: amount.toFixed(2) };
         });
 
       const friends: AvailableFriend[] = (friendRows ?? [])
-        .map((f: any) => { const fp = f.profiles as any; return { id: fp?.id ?? f.friend_id, full_name: fp?.full_name ?? "Unknown", username: fp?.username ?? "" }; })
+        .map((f: any) => { const fp = f.profiles as any; return { id: fp?.id ?? f.friend_id, full_name: fp?.full_name ?? "Unknown", username: fp?.username ?? "", avatarUrl: fp?.avatar_url ?? "" }; })
         .filter((f) => !prefilledMembers.some((m) => m.id === f.id));
 
       setEditMembers(prefilledMembers);
@@ -595,7 +610,7 @@ export default function HomeScreen() {
   };
 
   const addMemberToEdit = (friend: AvailableFriend) => {
-    setEditMembers((prev) => [...prev, { id: friend.id, full_name: friend.full_name, username: friend.username, shareAmount: 0, shareAmountInput: "0.00" }]);
+    setEditMembers((prev) => [...prev, { id: friend.id, full_name: friend.full_name, username: friend.username, avatarUrl: friend.avatarUrl, shareAmount: 0, shareAmountInput: "0.00" }]);
     setAvailableFriends((prev) => prev.filter((f) => f.id !== friend.id));
   };
 
@@ -778,6 +793,7 @@ export default function HomeScreen() {
           amount: detailOwnerShare,
           label: "Owner share",
           tone: "accent" as const,
+          avatarUrl: detailOwner?.avatarUrl || detailSplit.creatorAvatarUrl || "",
         },
         ...(currentUserId && currentUserId !== detailSplit.creator_id
           ? [{
@@ -787,6 +803,7 @@ export default function HomeScreen() {
               amount: Math.abs(detailSplit.myBalance),
               label: detailSplit.myBalance < -BALANCE_EPSILON ? "Owes" : "Settled",
               tone: detailSplit.myBalance < -BALANCE_EPSILON ? "red" as const : "muted" as const,
+              avatarUrl: "",
             }]
           : []),
         ...detailSplit.friends
@@ -802,6 +819,7 @@ export default function HomeScreen() {
               amount,
               label: isSettled ? "Settled" : "Owes",
               tone: isSettled ? "muted" as const : "red" as const,
+              avatarUrl: friend.avatarUrl || "",
             };
           }),
       ]
@@ -1017,7 +1035,11 @@ export default function HomeScreen() {
                     return (
                       <View key={`${member.id}-${member.role}`} style={styles.detailMemberRow}>
                         <View style={styles.detailMemberAvatar}>
-                          <Text style={styles.detailMemberAvatarText}>{member.name.charAt(0).toUpperCase()}</Text>
+                          {member.avatarUrl ? (
+                            <Image source={{ uri: member.avatarUrl }} style={styles.avatarImage} resizeMode="cover" />
+                          ) : (
+                            <Text style={styles.detailMemberAvatarText}>{member.name.charAt(0).toUpperCase()}</Text>
+                          )}
                         </View>
                         <View style={styles.detailMemberBody}>
                           <Text style={styles.detailMemberName}>{member.name}</Text>
@@ -1108,7 +1130,11 @@ export default function HomeScreen() {
                       {editMembers.map((member) => (
                         <View key={member.id} style={styles.memberRow}>
                           <View style={styles.memberAvatar}>
-                            <Text style={styles.memberAvatarText}>{member.full_name?.charAt(0)?.toUpperCase()}</Text>
+                            {member.avatarUrl ? (
+                              <Image source={{ uri: member.avatarUrl }} style={styles.avatarImage} resizeMode="cover" />
+                            ) : (
+                              <Text style={styles.memberAvatarText}>{member.full_name?.charAt(0)?.toUpperCase()}</Text>
+                            )}
                           </View>
                           <View style={{ flex: 1 }}>
                             <Text style={styles.memberName}>{member.full_name}</Text>
@@ -1139,6 +1165,13 @@ export default function HomeScreen() {
                       <View style={styles.friendChips}>
                         {availableFriends.map((friend) => (
                           <Pressable key={friend.id} style={styles.friendChip} onPress={() => addMemberToEdit(friend)}>
+                            <View style={styles.friendChipAvatar}>
+                              {friend.avatarUrl ? (
+                                <Image source={{ uri: friend.avatarUrl }} style={styles.avatarImage} resizeMode="cover" />
+                              ) : (
+                                <Text style={styles.friendChipAvatarText}>{friend.full_name.charAt(0).toUpperCase()}</Text>
+                              )}
+                            </View>
                             <Text style={styles.friendChipText}>{friend.full_name} +</Text>
                           </Pressable>
                         ))}
@@ -1251,7 +1284,9 @@ return StyleSheet.create({
   cardFriends: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14, paddingBottom: 12, flexWrap: "wrap" },
   friendsLabel: { fontSize: 10, color: C.textMuted },
   friendPills: { flexDirection: "row", flexWrap: "wrap", gap: 4 },
-  friendPill: { backgroundColor: C.accentDim, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2, borderWidth: 1, borderColor: C.accent + "33" },
+  friendPill: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: C.accentDim, borderRadius: 12, paddingLeft: 3, paddingRight: 8, paddingVertical: 2, borderWidth: 1, borderColor: C.accent + "33" },
+  friendPillAvatar: { width: 18, height: 18, borderRadius: 9, backgroundColor: C.surface, alignItems: "center", justifyContent: "center", overflow: "hidden" },
+  friendPillAvatarText: { color: C.accentBright, fontSize: 9, fontWeight: "900" },
   friendPillText: { fontSize: 10, color: C.accentBright, fontWeight: "600" },
   friendPillExtra: { backgroundColor: C.surface, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 },
   friendPillExtraText: { fontSize: 10, color: C.textSecondary },
@@ -1282,7 +1317,8 @@ return StyleSheet.create({
   detailMembersList: { maxHeight: 300 },
   detailMembersContent: { gap: 9, paddingBottom: 4 },
   detailMemberRow: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: C.surface, borderRadius: 16, borderWidth: 1, borderColor: C.border, padding: 12 },
-  detailMemberAvatar: { width: 40, height: 40, borderRadius: 13, backgroundColor: C.accentDim, borderWidth: 1, borderColor: C.accent + "33", alignItems: "center", justifyContent: "center" },
+  detailMemberAvatar: { width: 40, height: 40, borderRadius: 13, backgroundColor: C.accentDim, borderWidth: 1, borderColor: C.accent + "33", alignItems: "center", justifyContent: "center", overflow: "hidden" },
+  avatarImage: { width: "100%", height: "100%" },
   detailMemberAvatarText: { color: C.accentBright, fontSize: 15, fontWeight: "900" },
   detailMemberBody: { flex: 1, minWidth: 0 },
   detailMemberName: { color: C.textPrimary, fontSize: 14, fontWeight: "800" },
@@ -1326,7 +1362,7 @@ return StyleSheet.create({
 
   // member row
   memberRow: { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: C.surface, borderRadius: 12, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: C.border },
-  memberAvatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: C.accentDim, justifyContent: "center", alignItems: "center" },
+  memberAvatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: C.accentDim, justifyContent: "center", alignItems: "center", overflow: "hidden" },
   memberAvatarText: { color: C.accentBright, fontWeight: "700" },
   memberName: { fontSize: 14, fontWeight: "600", color: C.textPrimary },
   memberHandle: { fontSize: 11, color: C.textSecondary },
@@ -1338,7 +1374,9 @@ return StyleSheet.create({
 
   // friend chips
   friendChips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  friendChip: { backgroundColor: C.accentDim, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7, borderWidth: 1, borderColor: C.accent + "44" },
+  friendChip: { flexDirection: "row", alignItems: "center", gap: 7, backgroundColor: C.accentDim, borderRadius: 20, paddingLeft: 5, paddingRight: 12, paddingVertical: 5, borderWidth: 1, borderColor: C.accent + "44" },
+  friendChipAvatar: { width: 24, height: 24, borderRadius: 12, backgroundColor: C.surface, justifyContent: "center", alignItems: "center", overflow: "hidden" },
+  friendChipAvatarText: { color: C.accentBright, fontSize: 11, fontWeight: "900" },
   friendChipText: { color: C.accentBright, fontSize: 13, fontWeight: "600" },
   noFriendsText: { marginTop: 16, color: C.textMuted, fontSize: 13, textAlign: "center" },
 

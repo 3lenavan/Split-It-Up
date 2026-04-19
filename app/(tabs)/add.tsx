@@ -24,6 +24,7 @@ import {
   Alert,
   Animated,
   Easing,
+  Image,
   Keyboard,
   Platform,
   Pressable,
@@ -194,7 +195,11 @@ function FriendChip({
     <Animated.View style={anim}>
       <View style={styles.chipCard}>
         <View style={styles.chipAvatar}>
-          <Text style={styles.chipAvatarText}>{initials}</Text>
+          {friend.avatar_url ? (
+            <Image source={{ uri: friend.avatar_url }} style={styles.avatarImage} resizeMode="cover" />
+          ) : (
+            <Text style={styles.chipAvatarText}>{initials}</Text>
+          )}
         </View>
         <View style={{ flex: 1 }}>
           <Text style={styles.chipName}>{friend.full_name}</Text>
@@ -280,7 +285,7 @@ export default function AddScreen({
     setUser(user);
     const { data } = await supabase
       .from("friends")
-      .select("id, user_id, friend_id, profiles:friend_id ( id, full_name, username )")
+      .select("id, user_id, friend_id, profiles:friend_id ( id, full_name, username, avatar_url )")
       .eq("user_id", user.id);
     if (data) setFriends(data);
   };
@@ -663,9 +668,13 @@ export default function AddScreen({
                         }}
                       >
                         <View style={styles.pickerAvatar}>
-                          <Text style={styles.pickerAvatarText}>
-                            {fp.full_name?.[0]?.toUpperCase() ?? "?"}
-                          </Text>
+                          {fp.avatar_url ? (
+                            <Image source={{ uri: fp.avatar_url }} style={styles.avatarImage} resizeMode="cover" />
+                          ) : (
+                            <Text style={styles.pickerAvatarText}>
+                              {fp.full_name?.[0]?.toUpperCase() ?? "?"}
+                            </Text>
+                          )}
                         </View>
                         <View style={{ flex: 1 }}>
                           <Text style={styles.pickerName}>{fp.full_name}</Text>
@@ -892,7 +901,9 @@ return StyleSheet.create({
     backgroundColor: C.accentDim,
     justifyContent: "center", alignItems: "center",
     borderWidth: 1, borderColor: C.accent + "55",
+    overflow: "hidden",
   },
+  avatarImage: { width: "100%", height: "100%" },
   chipAvatarText: { color: C.accentBright, fontWeight: "700", fontSize: 14 },
   chipName: { fontSize: 14, fontWeight: "600", color: C.textPrimary },
   chipHandle: { fontSize: 11, color: C.textSecondary, marginTop: 1 },
@@ -980,6 +991,7 @@ return StyleSheet.create({
     width: 36, height: 36, borderRadius: 18,
     backgroundColor: C.accentDim,
     justifyContent: "center", alignItems: "center",
+    overflow: "hidden",
   },
   pickerAvatarText: { color: C.accentBright, fontWeight: "700" },
   pickerName: { fontSize: 14, fontWeight: "600", color: C.textPrimary },
