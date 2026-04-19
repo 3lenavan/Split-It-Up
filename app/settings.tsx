@@ -1,11 +1,13 @@
 import { useAppTheme } from "@/lib/app-theme";
+import { AvatarDecoration } from "@/lib/avatar-decoration";
+import { AppBackground } from "@/lib/app-background";
 import { supabase } from "@/lib/supabaseClient";
 import { useIsFocused } from "@react-navigation/native";
 import { router } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
-import { ArrowLeft, Check, ChevronRight, LogOut, Moon, SunMedium, User } from "lucide-react-native";
+import { ArrowLeft, ChevronRight, LogOut, Palette, User } from "lucide-react-native";
 import { useEffect, useRef, useState } from "react";
-import { Alert, Animated, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Alert, Animated, Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 function useFadeSlide(delay = 0, isActive = true) {
@@ -36,7 +38,7 @@ function FloatingOrb({ style }: { style?: any }) {
   const opacity = useRef(new Animated.Value(0.18)).current;
 
   useEffect(() => {
-    Animated.loop(
+    const loop = Animated.loop(
       Animated.sequence([
         Animated.parallel([
           Animated.timing(scale, { toValue: 1.18, duration: 3200, useNativeDriver: true }),
@@ -47,7 +49,10 @@ function FloatingOrb({ style }: { style?: any }) {
           Animated.timing(opacity, { toValue: 0.18, duration: 3200, useNativeDriver: true }),
         ]),
       ])
-    ).start();
+    );
+
+    loop.start();
+    return () => loop.stop();
   }, [opacity, scale]);
 
   return <Animated.View pointerEvents="none" style={[style, { opacity, transform: [{ scale }] }]} />;
@@ -55,10 +60,12 @@ function FloatingOrb({ style }: { style?: any }) {
 
 export default function SettingsScreen() {
   const isFocused = useIsFocused();
-  const { palette: C, mode, setMode } = useAppTheme();
+  const { palette: C, backgroundMode } = useAppTheme();
   const styles = createStyles(C);
   const [profileName, setProfileName] = useState("friend");
   const [profileUsername, setProfileUsername] = useState("");
+  const [profileAvatarUrl, setProfileAvatarUrl] = useState("");
+  const [profileAvatarDecoration, setProfileAvatarDecoration] = useState("none");
   const [logoutPhase, setLogoutPhase] = useState<"idle" | "farewell">("idle");
   const logoutTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const farewellOpacity = useRef(new Animated.Value(0)).current;
@@ -66,11 +73,12 @@ export default function SettingsScreen() {
   const farewellSlide = useRef(new Animated.Value(20)).current;
   const farewellGlow = useRef(new Animated.Value(1)).current;
   const farewellProgress = useRef(new Animated.Value(0)).current;
+  const logoutGlowLoop = useRef<Animated.CompositeAnimation | null>(null);
 
   const headerAnim = useFadeSlide(0, isFocused);
   const heroAnim = useFadeSlide(80, isFocused);
   const profileAnim = useFadeSlide(160, isFocused);
-  const appearanceAnim = useFadeSlide(240, isFocused);
+  const customizeAnim = useFadeSlide(240, isFocused);
   const logoutAnim = useFadeSlide(320, isFocused);
 
   useEffect(() => {
@@ -78,14 +86,18 @@ export default function SettingsScreen() {
       const { data: { session } } = await supabase.auth.getSession();
       const user = session?.user;
       if (!user) return;
-      const { data } = await supabase.from("profiles").select("full_name, username").eq("id", user.id).single();
-      setProfileName(data?.full_name || data?.username || "friend");
-      setProfileUsername(data?.username || "");
+      const { data } = await supabase.from("profiles").select("*").eq("id", user.id).single();
+      const metadata = user.user_metadata ?? {};
+      setProfileName(data?.full_name || metadata.full_name || data?.username || metadata.username || "friend");
+      setProfileUsername(data?.username || metadata.username || "");
+      setProfileAvatarUrl(data?.avatar_url || metadata.avatar_url || "");
+      setProfileAvatarDecoration(data?.avatar_decoration || metadata.avatar_decoration || "none");
     };
 
     loadProfile();
 
     return () => {
+      logoutGlowLoop.current?.stop();
       logoutTimers.current.forEach(clearTimeout);
       logoutTimers.current = [];
     };
@@ -98,9 +110,12 @@ export default function SettingsScreen() {
       const { data: { session } } = await supabase.auth.getSession();
       const user = session?.user;
       if (!user) return;
-      const { data } = await supabase.from("profiles").select("full_name, username").eq("id", user.id).single();
-      setProfileName(data?.full_name || data?.username || "friend");
-      setProfileUsername(data?.username || "");
+      const { data } = await supabase.from("profiles").select("*").eq("id", user.id).single();
+      const metadata = user.user_metadata ?? {};
+      setProfileName(data?.full_name || metadata.full_name || data?.username || metadata.username || "friend");
+      setProfileUsername(data?.username || metadata.username || "");
+      setProfileAvatarUrl(data?.avatar_url || metadata.avatar_url || "");
+      setProfileAvatarDecoration(data?.avatar_decoration || metadata.avatar_decoration || "none");
     };
 
     loadProfile();
@@ -119,21 +134,27 @@ export default function SettingsScreen() {
           farewellGlow.setValue(1);
           farewellProgress.setValue(0);
           setLogoutPhase("farewell");
+          logoutGlowLoop.current?.stop();
+          const glowLoop = Animated.loop(
+            Animated.sequence([
+              Animated.timing(farewellGlow, { toValue: 1.08, duration: 800, useNativeDriver: true }),
+              Animated.timing(farewellGlow, { toValue: 1, duration: 800, useNativeDriver: true }),
+            ])
+          );
+          logoutGlowLoop.current = glowLoop;
 
           Animated.parallel([
             Animated.timing(farewellOpacity, { toValue: 1, duration: 320, useNativeDriver: true }),
             Animated.spring(farewellScale, { toValue: 1, tension: 85, friction: 12, useNativeDriver: true }),
             Animated.spring(farewellSlide, { toValue: 0, tension: 85, friction: 12, useNativeDriver: true }),
             Animated.timing(farewellProgress, { toValue: 1, duration: 1550, useNativeDriver: false }),
-            Animated.loop(
-              Animated.sequence([
-                Animated.timing(farewellGlow, { toValue: 1.08, duration: 800, useNativeDriver: true }),
-                Animated.timing(farewellGlow, { toValue: 1, duration: 800, useNativeDriver: true }),
-              ])
-            ),
+            glowLoop,
           ]).start();
 
           logoutTimers.current.push(
+            setTimeout(() => {
+              logoutGlowLoop.current?.stop();
+            }, 1600),
             setTimeout(async () => {
               await supabase.auth.signOut();
               router.replace("/auth");
@@ -148,9 +169,14 @@ export default function SettingsScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <FloatingOrb style={styles.orb1} />
-      <FloatingOrb style={styles.orb2} />
+    <SafeAreaView edges={["top", "left", "right"]} style={styles.safeArea}>
+      <AppBackground />
+      {backgroundMode === "default" ? (
+        <>
+          <FloatingOrb style={styles.orb1} />
+          <FloatingOrb style={styles.orb2} />
+        </>
+      ) : null}
 
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
         <Animated.View style={[styles.header, headerAnim]}>
@@ -185,7 +211,19 @@ export default function SettingsScreen() {
 
           <Pressable style={styles.actionRow} onPress={() => router.push("/edit-profile" as any)}>
             <View style={styles.actionIconWrap}>
-              <User size={18} color={C.accentBright} />
+              <View style={styles.actionAvatarBase}>
+                {profileAvatarUrl ? (
+                  <Image
+                    source={{ uri: profileAvatarUrl }}
+                    style={styles.actionAvatar}
+                    resizeMode="cover"
+                    onError={(event) => console.log("Settings image failed to load:", event.nativeEvent.error)}
+                  />
+                ) : (
+                  <User size={18} color={C.accentBright} />
+                )}
+              </View>
+              <AvatarDecoration decorationId={profileAvatarDecoration} size={54} />
             </View>
             <View style={styles.actionBody}>
               <Text style={styles.actionTitle}>{profileName}</Text>
@@ -197,50 +235,29 @@ export default function SettingsScreen() {
           </Pressable>
         </Animated.View>
 
-        <Animated.View style={[styles.glassCard, appearanceAnim]}>
+        <Animated.View style={[styles.glassCard, customizeAnim]}>
           <View style={styles.sectionTop}>
             <View>
-              <Text style={styles.sectionEyebrow}>Appearance</Text>
-              <Text style={styles.sectionTitle}>Theme</Text>
+              <Text style={styles.sectionEyebrow}>Customize</Text>
+              <Text style={styles.sectionTitle}>Theme and background</Text>
             </View>
             <View style={styles.sectionBadge}>
-              <Text style={styles.sectionBadgeText}>More soon</Text>
+              <Text style={styles.sectionBadgeText}>Personalize</Text>
             </View>
           </View>
 
-          <View style={styles.themeGrid}>
-            <Pressable
-              style={[styles.themeCard, mode === "dark" && styles.themeCardActive]}
-              onPress={() => setMode("dark")}
-            >
-              <View style={[styles.themeIconWrap, styles.themeIconWrapDark]}>
-                <Moon size={18} color={mode === "dark" ? "#fff" : C.textPrimary} />
+          <Pressable style={styles.actionRow} onPress={() => router.push("/customize" as any)}>
+            <View style={styles.actionIconWrap}>
+              <View style={styles.actionAvatarBase}>
+                <Palette size={18} color={C.accentBright} />
               </View>
-              <Text style={styles.themeTitle}>Dark</Text>
-              <Text style={styles.themeDescription}>The default premium look.</Text>
-              {mode === "dark" ? (
-                <View style={styles.themeCheck}>
-                  <Check size={14} color="#fff" />
-                </View>
-              ) : null}
-            </Pressable>
-
-            <Pressable
-              style={[styles.themeCard, mode === "light" && styles.themeCardActive]}
-              onPress={() => setMode("light")}
-            >
-              <View style={[styles.themeIconWrap, styles.themeIconWrapLight]}>
-                <SunMedium size={18} color={mode === "light" ? "#fff" : C.textPrimary} />
-              </View>
-              <Text style={styles.themeTitle}>Light</Text>
-              <Text style={styles.themeDescription}>Bright and clean for daytime use.</Text>
-              {mode === "light" ? (
-                <View style={styles.themeCheck}>
-                  <Check size={14} color="#fff" />
-                </View>
-              ) : null}
-            </Pressable>
-          </View>
+            </View>
+            <View style={styles.actionBody}>
+              <Text style={styles.actionTitle}>Customize</Text>
+              <Text style={styles.actionSubtitle}>Change the app theme and page background.</Text>
+            </View>
+            <ChevronRight size={18} color={C.textSecondary} />
+          </Pressable>
         </Animated.View>
 
         <Animated.View style={[styles.glassCard, logoutAnim]}>
@@ -269,14 +286,18 @@ export default function SettingsScreen() {
           <View style={styles.logoutBackdropGlowSecondary} />
           <Animated.View style={[styles.logoutFarewellCard, { transform: [{ scale: farewellScale }, { translateY: farewellSlide }] }]}>
             <LinearGradient
-              colors={["#f97316", "#fb7185", "#a855f7"]}
+              colors={[C.amber, C.red, C.accent]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
               style={styles.logoutFarewellBadge}
             >
-              <Text style={styles.logoutFarewellBadgeText}>
-                {(profileName || "S").charAt(0).toUpperCase()}
-              </Text>
+              {profileAvatarUrl ? (
+                <Image source={{ uri: profileAvatarUrl }} style={styles.logoutFarewellAvatar} resizeMode="cover" />
+              ) : (
+                <Text style={styles.logoutFarewellBadgeText}>
+                  {(profileName || "S").charAt(0).toUpperCase()}
+                </Text>
+              )}
             </LinearGradient>
             <Text style={styles.logoutFarewellEyebrow}>Signed out</Text>
             <Text style={styles.logoutFarewellTitle}>See you soon, {profileName}</Text>
@@ -335,6 +356,13 @@ const createStyles = (C: ReturnType<typeof useAppTheme>["palette"]) => StyleShee
     gap: 14,
   },
   actionIconWrap: {
+    width: 54,
+    height: 54,
+    position: "relative",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  actionAvatarBase: {
     width: 44,
     height: 44,
     borderRadius: 14,
@@ -343,32 +371,48 @@ const createStyles = (C: ReturnType<typeof useAppTheme>["palette"]) => StyleShee
     borderColor: `${C.accent}33`,
     alignItems: "center",
     justifyContent: "center",
+    overflow: "hidden",
   },
+  actionAvatar: { width: "100%", height: "100%" },
   actionBody: { flex: 1 },
   actionTitle: { color: C.textPrimary, fontSize: 15, fontWeight: "800", marginBottom: 4 },
   actionSubtitle: { color: C.textSecondary, fontSize: 12, lineHeight: 18 },
-  themeGrid: { gap: 12 },
-  themeCard: { position: "relative", backgroundColor: C.surface, borderRadius: 18, borderWidth: 1, borderColor: C.border, padding: 16 },
+  themeGrid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
+  themeCard: { position: "relative", width: "47%", minWidth: 142, flexGrow: 1, backgroundColor: C.surface, borderRadius: 18, borderWidth: 1, borderColor: C.border, padding: 16 },
   themeCardActive: { borderColor: C.accent, backgroundColor: C.accentDim },
-  themeIconWrap: { width: 42, height: 42, borderRadius: 14, alignItems: "center", justifyContent: "center", marginBottom: 12 },
-  themeIconWrapDark: { backgroundColor: C.mode === "dark" ? "rgba(255,255,255,0.12)" : "rgba(124,58,237,0.12)" },
-  themeIconWrapLight: { backgroundColor: C.mode === "light" ? "rgba(255,255,255,0.12)" : "rgba(56,189,248,0.12)" },
+  themeSwatches: { flexDirection: "row", alignItems: "center", marginBottom: 12, minHeight: 34 },
+  themeSwatch: { width: 34, height: 34, borderRadius: 17, borderWidth: 2 },
   themeTitle: { color: C.textPrimary, fontSize: 16, fontWeight: "800", marginBottom: 6 },
-  themeDescription: { color: C.textSecondary, fontSize: 13, lineHeight: 19, maxWidth: "90%" },
+  themeDescription: { color: C.textSecondary, fontSize: 12, lineHeight: 18, maxWidth: "92%" },
   themeCheck: { position: "absolute", top: 14, right: 14, width: 24, height: 24, borderRadius: 12, backgroundColor: C.accent, alignItems: "center", justifyContent: "center" },
+  appearanceDivider: { height: 1, backgroundColor: C.border, marginVertical: 18 },
+  appearanceSubhead: { marginBottom: 12 },
+  appearanceSubheadTitle: { color: C.textPrimary, fontSize: 17, fontWeight: "800", marginBottom: 4 },
+  appearanceSubheadText: { color: C.textSecondary, fontSize: 12, lineHeight: 18 },
+  backgroundGrid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
+  backgroundCard: { position: "relative", width: "47%", minWidth: 142, flexGrow: 1, backgroundColor: C.surface, borderRadius: 18, borderWidth: 1, borderColor: C.border, padding: 12 },
+  backgroundCardActive: { borderColor: C.accent, backgroundColor: C.accentDim },
+  backgroundPreview: { height: 74, borderRadius: 14, overflow: "hidden", marginBottom: 10, borderWidth: 1, borderColor: C.border },
+  backgroundPreviewBase: { ...StyleSheet.absoluteFillObject },
+  backgroundOrb: { position: "absolute", width: 58, height: 58, borderRadius: 29, opacity: 0.78 },
+  backgroundOrbOne: { top: -15, right: -9 },
+  backgroundOrbTwo: { bottom: -18, left: -10 },
+  backgroundTitle: { color: C.textPrimary, fontSize: 14, fontWeight: "800", marginBottom: 4 },
+  backgroundDescription: { color: C.textSecondary, fontSize: 11, lineHeight: 16, maxWidth: "92%" },
   logoutCopy: { color: C.textSecondary, fontSize: 13, lineHeight: 20, marginBottom: 16 },
   logoutButton: { flexDirection: "row", alignItems: "center", justifyContent: "center", backgroundColor: C.red, borderRadius: 18, paddingVertical: 16, overflow: "hidden", shadowColor: C.red, shadowOpacity: 0.35, shadowRadius: 16, shadowOffset: { width: 0, height: 6 }, elevation: 6 },
   logoutGlow: { position: "absolute", top: 0, left: "12%", right: "12%", height: 1, backgroundColor: "#fff", opacity: 0.25 },
   logoutText: { color: "#fff", fontSize: 15, fontWeight: "800", marginLeft: 8 },
-  logoutOverlay: { ...StyleSheet.absoluteFillObject, justifyContent: "center", alignItems: "center", backgroundColor: C.mode === "dark" ? "rgba(7, 7, 15, 0.76)" : "rgba(245,247,255,0.84)", paddingHorizontal: 24 },
-  logoutBackdropGlow: { position: "absolute", width: 300, height: 300, borderRadius: 150, backgroundColor: "rgba(248, 113, 113, 0.18)" },
-  logoutBackdropGlowSecondary: { position: "absolute", width: 180, height: 180, borderRadius: 90, backgroundColor: "rgba(168, 85, 247, 0.14)", bottom: "35%" },
-  logoutFarewellCard: { width: "100%", maxWidth: 332, borderRadius: 30, paddingHorizontal: 24, paddingVertical: 30, backgroundColor: C.mode === "dark" ? "rgba(15, 14, 36, 0.96)" : "rgba(255,255,255,0.96)", borderWidth: 1, borderColor: C.border, alignItems: "center" },
-  logoutFarewellBadge: { width: 72, height: 72, borderRadius: 36, alignItems: "center", justifyContent: "center", marginBottom: 18 },
+  logoutOverlay: { ...StyleSheet.absoluteFillObject, justifyContent: "center", alignItems: "center", backgroundColor: C.mode === "dark" ? `${C.bg}d9` : "rgba(245,247,255,0.84)", paddingHorizontal: 24 },
+  logoutBackdropGlow: { position: "absolute", width: 300, height: 300, borderRadius: 150, backgroundColor: `${C.red}2e` },
+  logoutBackdropGlowSecondary: { position: "absolute", width: 180, height: 180, borderRadius: 90, backgroundColor: `${C.accent}24`, bottom: "35%" },
+  logoutFarewellCard: { width: "100%", maxWidth: 332, borderRadius: 30, paddingHorizontal: 24, paddingVertical: 30, backgroundColor: C.mode === "dark" ? `${C.cardBright}f5` : "rgba(255,255,255,0.96)", borderWidth: 1, borderColor: C.border, alignItems: "center" },
+  logoutFarewellBadge: { width: 72, height: 72, borderRadius: 36, alignItems: "center", justifyContent: "center", marginBottom: 18, overflow: "hidden" },
+  logoutFarewellAvatar: { width: "100%", height: "100%" },
   logoutFarewellBadgeText: { color: "#fff", fontSize: 30, fontWeight: "900" },
-  logoutFarewellEyebrow: { color: "rgba(251, 113, 133, 0.82)", fontSize: 12, fontWeight: "700", textTransform: "uppercase", letterSpacing: 1.1, marginBottom: 10 },
+  logoutFarewellEyebrow: { color: C.red, fontSize: 12, fontWeight: "700", textTransform: "uppercase", letterSpacing: 1.1, marginBottom: 10 },
   logoutFarewellTitle: { color: C.textPrimary, fontSize: 28, fontWeight: "800", letterSpacing: -0.8, textAlign: "center", marginBottom: 8 },
   logoutFarewellSubtitle: { color: C.textSecondary, fontSize: 14, lineHeight: 20, textAlign: "center", marginBottom: 20 },
   logoutFarewellTrack: { width: "100%", height: 7, borderRadius: 999, overflow: "hidden", backgroundColor: C.mode === "dark" ? "rgba(255,255,255,0.08)" : "rgba(24,24,38,0.08)" },
-  logoutFarewellFill: { height: "100%", backgroundColor: "#fb7185" },
+  logoutFarewellFill: { height: "100%", backgroundColor: C.red },
 });

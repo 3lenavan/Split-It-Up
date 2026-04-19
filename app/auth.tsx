@@ -1,6 +1,7 @@
 import type { Session } from '@supabase/supabase-js'
 import { LinearGradient } from 'expo-linear-gradient'
 import { useRouter } from 'expo-router'
+import { Check, CheckCircle, Eye, EyeOff, LockKeyhole, Mail } from 'lucide-react-native'
 import { useEffect, useRef, useState } from 'react'
 import {
   ActivityIndicator,
@@ -8,6 +9,7 @@ import {
   Animated,
   Dimensions,
   Easing,
+  Image,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
@@ -22,6 +24,7 @@ import {
   View,
 } from 'react-native'
 import { THEME_PALETTES } from '../lib/app-theme'
+import { getRememberMePreference, setRememberMePreference } from '../lib/auth-preferences'
 import { supabase } from '../lib/supabaseClient'
 
 const { width, height } = Dimensions.get('window')
@@ -57,23 +60,25 @@ export default function AuthScreen() {
   const C = THEME_PALETTES.dark
   const styles = createStyles(C)
   const pageGradient: [string, string, string] = ['#0F0C29', '#1a1a4e', '#24243e']
+  const buttonGradient: [string, string, string] = ['#7F7FD5', '#86A8E7', '#91EAE4']
+  const overlayGradient: [string, string, string] = ['rgba(15,12,41,0.98)', 'rgba(22,20,56,0.96)', 'rgba(15,12,41,0.92)']
   const placeholderColor = 'rgba(255,255,255,0.3)'
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [sessionEmail, setSessionEmail] = useState<string | null>(null)
   const [welcomeName, setWelcomeName] = useState('')
+  const [welcomeAvatarUrl, setWelcomeAvatarUrl] = useState('')
   const [introMessage, setIntroMessage] = useState(() => pickRandomMessage(INTRO_MESSAGES))
   const [introBottomMessage, setIntroBottomMessage] = useState(() => pickRandomMessage(INTRO_BOTTOM_MESSAGES))
   const [showIntro, setShowIntro] = useState(true)
   const [entryPhase, setEntryPhase] = useState<'idle' | 'success' | 'loading'>('idle')
   const [loading, setLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
+  const [rememberMe, setRememberMe] = useState(false)
   const entryTimers = useRef<ReturnType<typeof setTimeout>[]>([])
   const introTimers = useRef<ReturnType<typeof setTimeout>[]>([])
 
   // Animation values — untouched
-  const [monkeyPosition] = useState(new Animated.Value(0))
-  const [eyeAnimation] = useState(new Animated.Value(0))
   const fadeAnim = useRef(new Animated.Value(0)).current
   const slideAnim = useRef(new Animated.Value(30)).current
   const scaleAnim = useRef(new Animated.Value(0.9)).current
@@ -101,6 +106,9 @@ export default function AuthScreen() {
   const loadingProgress = useRef(new Animated.Value(0)).current
 
   useEffect(() => {
+    const entryTimerList = entryTimers.current
+    const introTimerList = introTimers.current
+
     Animated.parallel([
       Animated.timing(fadeAnim, { toValue: 1, duration: 800, useNativeDriver: true, easing: Easing.out(Easing.cubic) }),
       Animated.timing(slideAnim, { toValue: 0, duration: 800, useNativeDriver: true, easing: Easing.out(Easing.cubic) }),
@@ -116,9 +124,15 @@ export default function AuthScreen() {
     )
     return () => {
       authListener.subscription.unsubscribe()
-      entryTimers.current.forEach((timer) => clearTimeout(timer))
-      introTimers.current.forEach((timer) => clearTimeout(timer))
+      entryTimerList.forEach((timer) => clearTimeout(timer))
+      introTimerList.forEach((timer) => clearTimeout(timer))
     }
+  }, [fadeAnim, scaleAnim, slideAnim, titleSlideAnim])
+
+  useEffect(() => {
+    getRememberMePreference()
+      .then(setRememberMe)
+      .catch(() => setRememberMe(false))
   }, [])
 
   useEffect(() => {
@@ -336,33 +350,23 @@ export default function AuthScreen() {
     }
   }, [logoFloatAnim])
 
-  useEffect(() => {
-    Animated.sequence([
-      Animated.timing(monkeyPosition, { toValue: showPassword ? -10 : 10, duration: 300, useNativeDriver: true, easing: Easing.elastic(1) }),
-      Animated.timing(monkeyPosition, { toValue: 0, duration: 200, useNativeDriver: true, easing: Easing.bounce }),
-    ]).start()
-    Animated.timing(eyeAnimation, { toValue: showPassword ? 1 : 0, duration: 300, useNativeDriver: true }).start()
-  }, [showPassword])
-
   const validateInputs = () => {
     if (!email || !password) { Alert.alert('Oops!', 'Please fill in all fields'); return false }
     if (password.length < 6) { Alert.alert('Uh oh!', 'Password must be at least 6 characters'); return false }
     return true
   }
 
-  const resolveWelcomeName = async (userId: string, emailValue: string) => {
+  const resolveWelcomeProfile = async (userId: string, emailValue: string) => {
     const { data } = await supabase
       .from('profiles')
-      .select('full_name, username')
+      .select('full_name, username, avatar_url')
       .eq('id', userId)
       .single()
 
-    return (
-      data?.username ||
-      data?.full_name ||
-      emailValue.split('@')[0] ||
-      'friend'
-    )
+    return {
+      name: data?.username || data?.full_name || emailValue.split('@')[0] || 'friend',
+      avatarUrl: data?.avatar_url || '',
+    }
   }
 
   const queueTimer = (callback: () => void, delay: number) => {
@@ -370,8 +374,9 @@ export default function AuthScreen() {
     entryTimers.current.push(timer)
   }
 
-  const playWelcomeAnimation = (name: string) => {
+  const playWelcomeAnimation = (name: string, avatarUrl = '') => {
     setWelcomeName(name)
+    setWelcomeAvatarUrl(avatarUrl)
     setEntryPhase('success')
     authExitOpacity.setValue(1)
     authExitScale.setValue(1)
@@ -491,17 +496,19 @@ export default function AuthScreen() {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password })
     setLoading(false)
     if (error) return Alert.alert('Login error', error.message)
+    await setRememberMePreference(rememberMe)
 
     const user = data.user
-    const name = user
-      ? await resolveWelcomeName(user.id, user.email ?? email)
-      : email.split('@')[0]
+    const profile = user
+      ? await resolveWelcomeProfile(user.id, user.email ?? email)
+      : { name: email.split('@')[0], avatarUrl: '' }
 
-    playWelcomeAnimation(name)
+    playWelcomeAnimation(profile.name, profile.avatarUrl)
   }
 
   const signOut = async () => {
     setLoading(true)
+    await setRememberMePreference(false)
     await supabase.auth.signOut()
     setLoading(false)
   }
@@ -524,13 +531,14 @@ export default function AuthScreen() {
         <SafeAreaView style={styles.safeArea}>
           <StatusBar barStyle="light-content" />
           <View style={styles.loggedInContent}>
-            <Animated.View style={[styles.successIcon, { transform: [{ translateY: monkeyPosition }] }]}>
-            </Animated.View>
-            <Text style={styles.loggedInTitle}>Welcome Back! 🎉</Text>
+            <View style={styles.successIcon}>
+              <CheckCircle size={64} color="#91EAE4" />
+            </View>
+            <Text style={styles.loggedInTitle}>Welcome Back</Text>
             <Text style={styles.loggedInEmail}>{sessionEmail}</Text>
             <TouchableOpacity style={styles.logoutButton} onPress={signOut} disabled={loading}>
-              <LinearGradient colors={['#7F7FD5', '#86A8E7', '#91EAE4']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.gradientButton}>
-                {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Sign Out 👋</Text>}
+              <LinearGradient colors={buttonGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.gradientButton}>
+                {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Sign Out</Text>}
               </LinearGradient>
             </TouchableOpacity>
           </View>
@@ -606,7 +614,9 @@ export default function AuthScreen() {
                   <Animated.View style={[styles.inputWrapper, { opacity: fadeAnim, transform: [{ translateX: slideAnim.interpolate({ inputRange: [0, 30], outputRange: [0, 20] }) }] }]}>
                     <Text style={styles.inputLabel}>EMAIL</Text>
                     <View style={styles.inputContainer}>
-                      <Text style={styles.inputIcon}>✉️</Text>
+                      <View style={styles.inputIcon}>
+                        <Mail size={18} color={C.textMuted} />
+                      </View>
                       <TextInput
                         placeholder="your@email.com"
                         placeholderTextColor={placeholderColor}
@@ -624,7 +634,9 @@ export default function AuthScreen() {
                   <Animated.View style={[styles.inputWrapper, { opacity: fadeAnim, transform: [{ translateX: slideAnim.interpolate({ inputRange: [0, 30], outputRange: [0, 10] }) }] }]}>
                     <Text style={styles.inputLabel}>PASSWORD</Text>
                     <View style={styles.inputContainer}>
-                      <Text style={styles.inputIcon}>🔒</Text>
+                      <View style={styles.inputIcon}>
+                        <LockKeyhole size={18} color={C.textMuted} />
+                      </View>
                       <TextInput
                         placeholder="••••••••"
                         placeholderTextColor={placeholderColor}
@@ -635,13 +647,24 @@ export default function AuthScreen() {
                         editable={!loading}
                       />
                       <TouchableOpacity onPress={togglePasswordVisibility} style={styles.eyeButton}>
-                        <Text style={styles.eyeButtonText}>{showPassword ? '🙈' : '🐵'}</Text>
+                        {showPassword ? <EyeOff size={20} color={C.textSecondary} /> : <Eye size={20} color={C.textSecondary} />}
                       </TouchableOpacity>
                     </View>
                   </Animated.View>
 
-                  {/* Forgot password */}
-                  <View style={styles.forgotPasswordContainer}>
+                  <View style={styles.loginOptionsRow}>
+                    <TouchableOpacity
+                      style={styles.rememberRow}
+                      onPress={() => setRememberMe((value) => !value)}
+                      activeOpacity={0.82}
+                      disabled={loading}
+                    >
+                      <View style={[styles.rememberBox, rememberMe && styles.rememberBoxActive]}>
+                        {rememberMe ? <Check size={12} color="#fff" strokeWidth={3} /> : null}
+                      </View>
+                      <Text style={styles.rememberTitle}>Remember me</Text>
+                    </TouchableOpacity>
+
                     <TouchableOpacity style={styles.forgotPassword} onPress={() => router.push('/reset-password')}>
                       <Text style={styles.forgotPasswordText}>Forgot password?</Text>
                     </TouchableOpacity>
@@ -650,7 +673,7 @@ export default function AuthScreen() {
                   {/* Sign in button */}
                   <Animated.View style={[styles.buttonWrapper, { opacity: fadeAnim, transform: [{ scale: fadeAnim.interpolate({ inputRange: [0, 1], outputRange: [0.8, 1] }) }] }]}>
                     <TouchableOpacity onPress={signIn} disabled={loading}>
-                      <LinearGradient colors={['#7F7FD5', '#86A8E7', '#91EAE4']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.gradientButton}>
+                      <LinearGradient colors={buttonGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.gradientButton}>
                         {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Sign In →</Text>}
                       </LinearGradient>
                     </TouchableOpacity>
@@ -666,7 +689,7 @@ export default function AuthScreen() {
                   {/* Sign up */}
                   <Animated.View style={[styles.toggleContainer, { opacity: fadeAnim, transform: [{ translateY: slideAnim.interpolate({ inputRange: [0, 30], outputRange: [0, 10] }) }] }]}>
                     <TouchableOpacity onPress={navigateToSignUp} disabled={loading}>
-                      <Text style={styles.toggleButton}>Create an account 🎉</Text>
+                      <Text style={styles.toggleButton}>Create an account</Text>
                     </TouchableOpacity>
                   </Animated.View>
                 </View>
@@ -681,7 +704,7 @@ export default function AuthScreen() {
       {showIntro && !sessionEmail && (
         <Animated.View pointerEvents="none" style={[styles.introOverlay, { opacity: introOverlayOpacity }]}>
           <LinearGradient
-            colors={['rgba(15,12,41,0.98)', 'rgba(22,20,56,0.96)', 'rgba(15,12,41,0.92)']}
+            colors={overlayGradient}
             start={{ x: 0.1, y: 0 }}
             end={{ x: 0.9, y: 1 }}
             style={StyleSheet.absoluteFillObject}
@@ -758,14 +781,18 @@ export default function AuthScreen() {
               ]}
             >
               <LinearGradient
-                colors={['#7F7FD5', '#86A8E7', '#91EAE4']}
+                colors={buttonGradient}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={styles.successStageEmojiWrap}
               >
-                <Text style={styles.successStageEmoji}>:)</Text>
+                {welcomeAvatarUrl ? (
+                  <Image source={{ uri: welcomeAvatarUrl }} style={styles.welcomeAvatarImage} resizeMode="cover" />
+                ) : (
+                  <Text style={styles.successStageEmoji}>{welcomeName ? welcomeName.charAt(0).toUpperCase() : 'W'}</Text>
+                )}
               </LinearGradient>
-              <Text style={styles.successStageTitle}>Successful</Text>
+              <Text style={styles.successStageTitle}>Welcome back</Text>
               <Text style={styles.successStageSubtitle}>
                 You are signed in, {welcomeName}.
               </Text>
@@ -791,14 +818,18 @@ export default function AuthScreen() {
                 ]}
               >
                 <LinearGradient
-                  colors={['#7F7FD5', '#86A8E7', '#91EAE4']}
+                  colors={buttonGradient}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 1 }}
                   style={styles.welcomeBadge}
                 >
-                  <Text style={styles.welcomeBadgeText}>
-                    {welcomeName ? welcomeName.charAt(0).toUpperCase() : 'W'}
-                  </Text>
+                  {welcomeAvatarUrl ? (
+                    <Image source={{ uri: welcomeAvatarUrl }} style={styles.welcomeAvatarImage} resizeMode="cover" />
+                  ) : (
+                    <Text style={styles.welcomeBadgeText}>
+                      {welcomeName ? welcomeName.charAt(0).toUpperCase() : 'W'}
+                    </Text>
+                  )}
                 </LinearGradient>
                 <View style={styles.loadingStageTextWrap}>
                   <Text style={styles.welcomeEyebrow}>Welcome back</Text>
@@ -940,14 +971,17 @@ const createStyles = (C: typeof THEME_PALETTES.dark) => StyleSheet.create({
   inputWrapper: { marginBottom: 16 },
   inputLabel: { fontSize: 11, fontWeight: '600', color: C.textSecondary, letterSpacing: 1, marginBottom: 8 },
   inputContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.mode === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(24,24,38,0.04)', borderRadius: 14, borderWidth: 1, borderColor: C.mode === 'dark' ? 'rgba(255,255,255,0.12)' : 'rgba(24,24,38,0.08)', paddingHorizontal: 14, overflow: 'hidden' },
-  inputIcon: { fontSize: 15, marginRight: 10 },
+  inputIcon: { width: 22, marginRight: 10, alignItems: 'center' },
   input: { flex: 1, paddingVertical: 14, fontSize: 16, color: C.textPrimary },
   passwordInput: { paddingRight: 50 },
   eyeButton: { position: 'absolute', right: 12, padding: 8 },
-  eyeButtonText: { fontSize: 22 },
+  loginOptionsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: -2, marginBottom: 16 },
+  rememberRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4, paddingRight: 8 },
+  rememberBox: { width: 18, height: 18, borderRadius: 6, borderWidth: 1, borderColor: C.mode === 'dark' ? 'rgba(255,255,255,0.22)' : 'rgba(24,24,38,0.16)', backgroundColor: C.mode === 'dark' ? 'rgba(255,255,255,0.055)' : 'rgba(255,255,255,0.72)', alignItems: 'center', justifyContent: 'center' },
+  rememberBoxActive: { backgroundColor: C.accent, borderColor: C.accentBright },
+  rememberTitle: { color: C.textSecondary, fontSize: 12, fontWeight: '700' },
 
   // Forgot
-  forgotPasswordContainer: { alignItems: 'flex-end', marginBottom: 16 },
   forgotPassword: { padding: 4 },
   forgotPasswordText: { color: C.blue, fontSize: 13, fontWeight: '600' },
 
@@ -967,8 +1001,7 @@ const createStyles = (C: typeof THEME_PALETTES.dark) => StyleSheet.create({
 
   // Logged in
   loggedInContent: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
-  successIcon: { marginBottom: 24 },
-  successIconText: { fontSize: 100 },
+  successIcon: { marginBottom: 24, alignItems: 'center' },
   loggedInTitle: { fontSize: 32, fontWeight: '800', color: C.textPrimary, marginBottom: 8 },
   loggedInEmail: { fontSize: 18, color: C.textSecondary, marginBottom: 32, textAlign: 'center' },
   logoutButton: { width: '100%', maxWidth: 300, borderRadius: 16, overflow: 'hidden', elevation: 5 },
@@ -1002,6 +1035,7 @@ const createStyles = (C: typeof THEME_PALETTES.dark) => StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 18,
+    overflow: 'hidden',
   },
   successStageEmoji: {
     color: '#FFFFFF',
@@ -1059,6 +1093,11 @@ const createStyles = (C: typeof THEME_PALETTES.dark) => StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 18,
+    overflow: 'hidden',
+  },
+  welcomeAvatarImage: {
+    width: '100%',
+    height: '100%',
   },
   welcomeBadgeText: {
     color: '#FFFFFF',

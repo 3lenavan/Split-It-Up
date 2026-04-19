@@ -3,15 +3,18 @@
  * Dark theme matching add/profile screens. All features preserved.
  * Smooth entrance animations, glowing cards, animated balance summary.
  *****************************************************************************/
-import { supabase } from "@/lib/supabaseClient";
+import { AppBackground } from "@/lib/app-background";
 import { THEME_PALETTES, useAppTheme } from "@/lib/app-theme";
+import { supabase } from "@/lib/supabaseClient";
 import { useIsFocused } from "@react-navigation/native";
-import { Edit2, Receipt, Sparkles, Trash2, TrendingUp, Users } from "lucide-react-native";
+import { ChevronDown, Edit2, House, Receipt, SlidersHorizontal, Trash2, TrendingUp, Users } from "lucide-react-native";
 import { useEffect, useRef, useState } from "react";
 import {
   Alert,
   Animated,
   AppState,
+  Easing,
+  Image,
   Keyboard,
   KeyboardAvoidingView,
   LayoutAnimation,
@@ -23,7 +26,6 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  TouchableWithoutFeedback,
   UIManager,
   View,
 } from "react-native";
@@ -33,7 +35,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 // ── Palette ───────────────────────────────────────────────────────────────────
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-type Friend = { id: string; name: string; balance: number };
+type Friend = { id: string; name: string; balance: number; avatarUrl?: string };
 type Split = {
   id: string;
   title: string;
@@ -42,17 +44,31 @@ type Split = {
   creator_id: string;
   creatorUsername: string;
   creatorName: string;
+  creatorAvatarUrl: string;
   myBalance: number;
   friends: Friend[];
   paymentRequested?: boolean;
 };
-type EditableMember = { id: string; full_name: string; username: string; shareAmount: number; shareAmountInput: string };
-type AvailableFriend = { id: string; full_name: string; username: string };
+type EditableMember = { id: string; full_name: string; username: string; avatarUrl?: string; shareAmount: number; shareAmountInput: string };
+type AvailableFriend = { id: string; full_name: string; username: string; avatarUrl?: string };
+type SplitFilter = "all" | "owe" | "owed" | "settled";
 type HomePalette = typeof THEME_PALETTES.dark;
 type HomeStyles = ReturnType<typeof createStyles>;
 
+const BALANCE_EPSILON = 0.005;
+const FILTER_OPTIONS: { id: SplitFilter; label: string; hint: string }[] = [
+  { id: "all", label: "All", hint: "Every split" },
+  { id: "owe", label: "I owe", hint: "Still to pay" },
+  { id: "owed", label: "Owed to me", hint: "Money back" },
+  { id: "settled", label: "Settled", hint: "All clear" },
+];
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const isUuid = (value?: string | null) => !!value && UUID_RE.test(value);
+const cleanNumberInput = (value: string) => value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1");
+const formatClampedNumber = (value: number) => {
+  const fixed = value.toFixed(2);
+  return fixed.replace(/\.0+$/, "").replace(/(\.\d*?)0+$/, "$1");
+};
 const splitDeleteAnimation = {
   duration: 280,
   create: {
@@ -70,26 +86,48 @@ const splitDeleteAnimation = {
 
 // ── Animated entrance hook ────────────────────────────────────────────────────
 function useFadeSlide(delay = 0, isActive = true) {
+  const scale = useRef(new Animated.Value(0.82)).current;
   const opacity = useRef(new Animated.Value(0)).current;
-  const translateY = useRef(new Animated.Value(22)).current;
+  const translateY = useRef(new Animated.Value(24)).current;
 
   useEffect(() => {
     if (!isActive) {
+      scale.setValue(0.82);
       opacity.setValue(0);
-      translateY.setValue(22);
+      translateY.setValue(24);
       return;
     }
 
+    scale.setValue(0.82);
     opacity.setValue(0);
-    translateY.setValue(22);
+    translateY.setValue(24);
 
-    Animated.parallel([
-      Animated.timing(opacity, { toValue: 1, duration: 480, delay, useNativeDriver: true }),
-      Animated.spring(translateY, { toValue: 0, delay, tension: 80, friction: 12, useNativeDriver: true }),
+    Animated.sequence([
+      Animated.delay(delay),
+      Animated.parallel([
+        Animated.spring(scale, {
+          toValue: 1,
+          damping: 14,
+          stiffness: 160,
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacity, {
+          toValue: 1,
+          duration: 280,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.spring(translateY, {
+          toValue: 0,
+          damping: 14,
+          stiffness: 160,
+          useNativeDriver: true,
+        }),
+      ]),
     ]).start();
-  }, [delay, isActive, opacity, translateY]);
+  }, [delay, isActive, scale, opacity, translateY]);
 
-  return { opacity, transform: [{ translateY }] };
+  return { opacity, transform: [{ scale }, { translateY }] };
 }
 
 // ── Floating orb ──────────────────────────────────────────────────────────────
@@ -97,7 +135,7 @@ function FloatingOrb({ style }: { style?: any }) {
   const scale = useRef(new Animated.Value(1)).current;
   const opacity = useRef(new Animated.Value(0.15)).current;
   useEffect(() => {
-    Animated.loop(Animated.sequence([
+    const loop = Animated.loop(Animated.sequence([
       Animated.parallel([
         Animated.timing(scale, { toValue: 1.2, duration: 3500, useNativeDriver: true }),
         Animated.timing(opacity, { toValue: 0.25, duration: 3500, useNativeDriver: true }),
@@ -106,8 +144,11 @@ function FloatingOrb({ style }: { style?: any }) {
         Animated.timing(scale, { toValue: 1, duration: 3500, useNativeDriver: true }),
         Animated.timing(opacity, { toValue: 0.15, duration: 3500, useNativeDriver: true }),
       ]),
-    ])).start();
-  }, []);
+    ]));
+
+    loop.start();
+    return () => loop.stop();
+  }, [opacity, scale]);
   return <Animated.View style={[style, { opacity, transform: [{ scale }] }]} pointerEvents="none" />;
 }
 
@@ -115,6 +156,9 @@ function FloatingOrb({ style }: { style?: any }) {
 type SplitCardProps = {
   split: Split;
   currentUserId: string | null;
+  entryDelay: number;
+  isFocused: boolean;
+  onOpenDetails: (split: Split) => void;
   onMenuOpen: (split: Split, position: { x: number; y: number }) => void;
   onDelete: (split: Split) => void;
   onRequestPayment: (split: Split) => void;
@@ -122,8 +166,9 @@ type SplitCardProps = {
   styles: HomeStyles;
 };
 
-function SplitCard({ split, currentUserId, onMenuOpen, onDelete, onRequestPayment, palette: C, styles }: SplitCardProps) {
+function SplitCard({ split, currentUserId, entryDelay, isFocused, onOpenDetails, onMenuOpen, onDelete, onRequestPayment, palette: C, styles }: SplitCardProps) {
   const menuButtonRef = useRef<View>(null);
+  const entryAnim = useFadeSlide(entryDelay, isFocused);
 
   const owedToYou = split.myBalance > 0 ? split.myBalance : 0;
   const youOwe = split.myBalance < 0 ? Math.abs(split.myBalance) : 0;
@@ -152,14 +197,15 @@ function SplitCard({ split, currentUserId, onMenuOpen, onDelete, onRequestPaymen
   );
 
   return (
-    <Swipeable
-      renderRightActions={renderRightActions}
-      overshootRight={false}
-      activeOffsetX={[-18, 18]}
-      failOffsetY={[-10, 10]}
-      dragOffsetFromRightEdge={24}
-    >
-      <View style={styles.card}>
+    <Animated.View style={entryAnim}>
+      <Swipeable
+        renderRightActions={renderRightActions}
+        overshootRight={false}
+        activeOffsetX={[-40, 40]}
+        failOffsetY={[-6, 6]}
+        dragOffsetFromRightEdge={24}
+      >
+        <Pressable style={styles.card} onPress={() => onOpenDetails(split)}>
           {/* top accent line */}
           <View style={[styles.cardAccentLine, { backgroundColor: statusColor }]} />
 
@@ -174,7 +220,15 @@ function SplitCard({ split, currentUserId, onMenuOpen, onDelete, onRequestPaymen
               </Text>
               <Text style={styles.cardOwner} numberOfLines={1}>Owner: {ownerLabel}</Text>
             </View>
-            <Pressable ref={menuButtonRef} hitSlop={10} style={styles.menuTrigger} onPress={handleMenuPress}>
+            <Pressable
+              ref={menuButtonRef}
+              hitSlop={10}
+              style={styles.menuTrigger}
+              onPress={(event) => {
+                event.stopPropagation();
+                handleMenuPress();
+              }}
+            >
               <Text style={styles.menuDots}>⋯</Text>
             </Pressable>
           </View>
@@ -203,7 +257,10 @@ function SplitCard({ split, currentUserId, onMenuOpen, onDelete, onRequestPaymen
             <View style={styles.paymentActionWrap}>
               <Pressable
                 style={[styles.paymentActionButton, split.paymentRequested && styles.paymentActionButtonSent]}
-                onPress={() => onRequestPayment(split)}
+                onPress={(event) => {
+                  event.stopPropagation();
+                  onRequestPayment(split);
+                }}
                 disabled={split.paymentRequested}
               >
                 <Text style={[styles.paymentActionText, split.paymentRequested && styles.paymentActionTextSent]}>
@@ -221,6 +278,13 @@ function SplitCard({ split, currentUserId, onMenuOpen, onDelete, onRequestPaymen
               <View style={styles.friendPills}>
                 {split.friends.slice(0, MAX_BADGES).map((friend) => (
                   <View key={friend.id} style={styles.friendPill}>
+                    <View style={styles.friendPillAvatar}>
+                      {friend.avatarUrl ? (
+                        <Image source={{ uri: friend.avatarUrl }} style={styles.avatarImage} resizeMode="cover" />
+                      ) : (
+                        <Text style={styles.friendPillAvatarText}>{friend.name.charAt(0).toUpperCase()}</Text>
+                      )}
+                    </View>
                     <Text style={styles.friendPillText}>{friend.name}</Text>
                   </View>
                 ))}
@@ -232,20 +296,24 @@ function SplitCard({ split, currentUserId, onMenuOpen, onDelete, onRequestPaymen
               </View>
             </View>
           )}
-      </View>
-    </Swipeable>
+        </Pressable>
+      </Swipeable>
+    </Animated.View>
   );
 }
 
 // ── HomeScreen ────────────────────────────────────────────────────────────────
 export default function HomeScreen() {
-  const { palette } = useAppTheme();
+  const { palette, backgroundMode } = useAppTheme();
   const C = palette;
   const styles = createStyles(C);
   const [splits, setSplits] = useState<Split[]>([]);
+  const [activeFilter, setActiveFilter] = useState<SplitFilter>("all");
+  const [filterOpen, setFilterOpen] = useState(false);
   const isFocused = useIsFocused();
   const [loading, setLoading] = useState(true);
   const [selectedSplit, setSelectedSplit] = useState<Split | null>(null);
+  const [detailSplit, setDetailSplit] = useState<Split | null>(null);
   const [actionMenuVisible, setActionMenuVisible] = useState(false);
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
   const [editModalVisible, setEditModalVisible] = useState(false);
@@ -253,22 +321,35 @@ export default function HomeScreen() {
   const [editTotal, setEditTotal] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [editMembers, setEditMembers] = useState<EditableMember[]>([]);
+  const [editOriginalMemberIds, setEditOriginalMemberIds] = useState<string[]>([]);
   const [availableFriends, setAvailableFriends] = useState<AvailableFriend[]>([]);
   const [loadingEditData, setLoadingEditData] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
   // header anim
-  const headerAnim = useFadeSlide(0, isFocused);
-  const summaryAnim = useFadeSlide(80, isFocused);
-  const contentAnim = useFadeSlide(160, isFocused);
-  const listAnim = useFadeSlide(240, isFocused);
+  const headerAnim = useFadeSlide(60, isFocused);
+  const owedSummaryAnim = useFadeSlide(140, isFocused);
+  const oweSummaryAnim = useFadeSlide(180, isFocused);
+  const splitsSummaryAnim = useFadeSlide(220, isFocused);
+  const contentAnim = useFadeSlide(260, isFocused);
+  const filterAnim = useFadeSlide(260, isFocused);
+  const filterReveal = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
       UIManager.setLayoutAnimationEnabledExperimental(true);
     }
   }, []);
+
+  useEffect(() => {
+    Animated.timing(filterReveal, {
+      toValue: filterOpen ? 1 : 0,
+      duration: filterOpen ? 260 : 210,
+      easing: filterOpen ? Easing.out(Easing.cubic) : Easing.in(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+  }, [filterOpen, filterReveal]);
 
   const loadSplits = async (showSpinner = true) => {
     if (showSpinner) setLoading(true);
@@ -282,7 +363,7 @@ export default function HomeScreen() {
       .from("splits")
       .select(`id, title, total_amount, created_at, creator_id,
         my_membership:split_members!inner( profile_id, share_amount ),
-        all_members:split_members( profile_id, share_amount, profiles( id, full_name ) )`)
+        all_members:split_members( profile_id, share_amount, profiles( id, full_name, avatar_url ) )`)
       .eq("my_membership.profile_id", user.id);
 
     if (error) { console.error("Error fetching splits:", error); setLoading(false); return; }
@@ -292,7 +373,7 @@ export default function HomeScreen() {
     const { data: creatorProfiles, error: creatorProfilesError } = creatorIds.length > 0
       ? await supabase
           .from("profiles")
-          .select("id, full_name, username")
+          .select("id, full_name, username, avatar_url")
           .in("id", creatorIds)
       : { data: [], error: null };
 
@@ -318,7 +399,12 @@ export default function HomeScreen() {
       const creatorProfile = creatorProfilesById.get(split.creator_id);
       const friends: Friend[] = (split.all_members ?? [])
         .filter((m: any) => m.profile_id !== user.id)
-        .map((m: any) => ({ id: m.profile_id, name: m.profiles?.full_name ?? "Unknown", balance: m.share_amount ?? 0 }));
+        .map((m: any) => ({
+          id: m.profile_id,
+          name: m.profiles?.full_name ?? "Unknown",
+          avatarUrl: m.profiles?.avatar_url ?? "",
+          balance: m.share_amount ?? 0,
+        }));
       const rawBalance = Number(myRow?.share_amount ?? 0);
       const myBalance = split.creator_id === user.id
         ? friends.reduce((sum, friend) => sum + Math.abs(Number(friend.balance ?? 0)), 0)
@@ -334,6 +420,7 @@ export default function HomeScreen() {
         creator_id: split.creator_id,
         creatorUsername: creatorProfile?.username ?? "",
         creatorName: creatorProfile?.full_name ?? "",
+        creatorAvatarUrl: creatorProfile?.avatar_url ?? "",
         myBalance,
         friends,
         paymentRequested: requestedSplitIds.has(split.id),
@@ -379,8 +466,35 @@ export default function HomeScreen() {
   }, [currentUserId, isFocused]);
 
   // summary numbers
-  const totalOwed = splits.reduce((s, sp) => s + (sp.myBalance > 0 ? sp.myBalance : 0), 0);
-  const totalOwe = splits.reduce((s, sp) => s + (sp.myBalance < 0 ? Math.abs(sp.myBalance) : 0), 0);
+  const totalOwed = splits.reduce((s, sp) => s + (sp.myBalance > BALANCE_EPSILON ? sp.myBalance : 0), 0);
+  const totalOwe = splits.reduce((s, sp) => s + (sp.myBalance < -BALANCE_EPSILON ? Math.abs(sp.myBalance) : 0), 0);
+  const filterCounts: Record<SplitFilter, number> = {
+    all: splits.length,
+    owe: splits.filter((split) => split.myBalance < -BALANCE_EPSILON).length,
+    owed: splits.filter((split) => split.myBalance > BALANCE_EPSILON).length,
+    settled: splits.filter((split) => Math.abs(split.myBalance) <= BALANCE_EPSILON).length,
+  };
+  const filteredSplits = splits.filter((split) => {
+    if (activeFilter === "owe") return split.myBalance < -BALANCE_EPSILON;
+    if (activeFilter === "owed") return split.myBalance > BALANCE_EPSILON;
+    if (activeFilter === "settled") return Math.abs(split.myBalance) <= BALANCE_EPSILON;
+    return true;
+  });
+  const activeFilterOption = FILTER_OPTIONS.find((option) => option.id === activeFilter) ?? FILTER_OPTIONS[0];
+  const filterOptionsAnim = {
+    maxHeight: filterReveal.interpolate({ inputRange: [0, 1], outputRange: [0, 84] }),
+    marginTop: filterReveal.interpolate({ inputRange: [0, 1], outputRange: [0, 12] }),
+    opacity: filterReveal,
+    transform: [
+      { translateY: filterReveal.interpolate({ inputRange: [0, 1], outputRange: [-8, 0] }) },
+      { scale: filterReveal.interpolate({ inputRange: [0, 1], outputRange: [0.98, 1] }) },
+    ],
+  };
+  const filterChevronAnim = {
+    transform: [
+      { rotate: filterReveal.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "180deg"] }) },
+    ],
+  };
 
   const openActionMenu = (split: Split, position: { x: number; y: number }) => {
     setSelectedSplit(split); setMenuPosition(position); setActionMenuVisible(true);
@@ -396,15 +510,16 @@ export default function HomeScreen() {
     setEditTitle(selectedSplit.title);
     setEditTotal(String(selectedSplit.total_amount));
     setEditMembers([]); setAvailableFriends([]);
+    setEditOriginalMemberIds([]);
     setLoadingEditData(true); setActionMenuVisible(false); setEditModalVisible(true);
 
     try {
       const { data: memberRows, error: memberError } = await supabase
-        .from("split_members").select(`profile_id, share_amount, profiles (id, full_name, username)`).eq("split_id", selectedSplit.id);
+        .from("split_members").select(`profile_id, share_amount, profiles (id, full_name, username, avatar_url)`).eq("split_id", selectedSplit.id);
       if (memberError) console.error("Error fetching split members:", memberError);
 
       const { data: friendRows, error: friendError } = await supabase
-        .from("friends").select(`id, user_id, friend_id, profiles:friend_id (id, full_name, username)`).eq("user_id", user.id);
+        .from("friends").select(`id, user_id, friend_id, profiles:friend_id (id, full_name, username, avatar_url)`).eq("user_id", user.id);
       if (friendError) console.error("Error fetching friends:", friendError);
 
       const prefilledMembers: EditableMember[] = (memberRows ?? [])
@@ -412,14 +527,16 @@ export default function HomeScreen() {
         .map((m: any) => {
           const profile = m.profiles as any;
           const amount = Math.abs(Number(m.share_amount ?? 0));
-          return { id: profile?.id ?? m.profile_id, full_name: profile?.full_name ?? "Unknown", username: profile?.username ?? "", shareAmount: amount, shareAmountInput: amount.toFixed(2) };
+          return { id: profile?.id ?? m.profile_id, full_name: profile?.full_name ?? "Unknown", username: profile?.username ?? "", avatarUrl: profile?.avatar_url ?? "", shareAmount: amount, shareAmountInput: amount.toFixed(2) };
         });
 
       const friends: AvailableFriend[] = (friendRows ?? [])
-        .map((f: any) => { const fp = f.profiles as any; return { id: fp?.id ?? f.friend_id, full_name: fp?.full_name ?? "Unknown", username: fp?.username ?? "" }; })
+        .map((f: any) => { const fp = f.profiles as any; return { id: fp?.id ?? f.friend_id, full_name: fp?.full_name ?? "Unknown", username: fp?.username ?? "", avatarUrl: fp?.avatar_url ?? "" }; })
         .filter((f) => !prefilledMembers.some((m) => m.id === f.id));
 
-      setEditMembers(prefilledMembers); setAvailableFriends(friends);
+      setEditMembers(prefilledMembers);
+      setEditOriginalMemberIds(prefilledMembers.map((member) => member.id));
+      setAvailableFriends(friends);
     } finally { setLoadingEditData(false); }
   };
 
@@ -428,6 +545,7 @@ export default function HomeScreen() {
     setEditTitle("");
     setEditTotal("");
     setEditMembers([]);
+    setEditOriginalMemberIds([]);
     setAvailableFriends([]);
   };
 
@@ -439,6 +557,7 @@ export default function HomeScreen() {
   const totalAmount = parseFloat(editTotal) || 0;
   const allocated = editMembers.reduce((sum, m) => sum + (parseFloat(m.shareAmountInput) || 0), 0);
   const creatorShare = Math.max(0, totalAmount - allocated);
+  const editOverAllocated = totalAmount > 0 && allocated - totalAmount > BALANCE_EPSILON;
 
   const saveSplitEdits = async () => {
     if (!selectedSplit || !currentUserId) return;
@@ -447,10 +566,30 @@ export default function HomeScreen() {
     if (selectedSplit.creator_id !== user.id) { Alert.alert("Can't edit", "Only the creator can edit this split."); return; }
     const parsedTotal = Number(editTotal);
     if (!editTitle.trim() || Number.isNaN(parsedTotal) || parsedTotal <= 0) { Alert.alert("Invalid input", "Please enter a valid name and amount."); return; }
+    if (allocated - parsedTotal > BALANCE_EPSILON) {
+      Alert.alert("Too Much Assigned", "Member shares are more than the total bill. Lower one of the amounts first.");
+      return;
+    }
     setIsSaving(true);
     try {
       const { error } = await supabase.from("splits").update({ title: editTitle.trim(), total_amount: parsedTotal }).eq("id", selectedSplit.id);
       if (error) { Alert.alert("Error", "Could not save changes. Please try again."); return; }
+      const savedMemberIds = new Set(editMembers.map((member) => member.id));
+      const removedMemberIds = editOriginalMemberIds.filter((memberId) => !savedMemberIds.has(memberId));
+
+      if (removedMemberIds.length > 0) {
+        const { error: deleteMemberError } = await supabase
+          .from("split_members")
+          .delete()
+          .eq("split_id", selectedSplit.id)
+          .in("profile_id", removedMemberIds);
+
+        if (deleteMemberError) {
+          Alert.alert("Error", "Could not remove old members from this split.");
+          return;
+        }
+      }
+
       const memberRows = [
         { split_id: selectedSplit.id, profile_id: currentUserId, share_percentage: parsedTotal > 0 ? (creatorShare / parsedTotal) * 100 : 0, share_amount: creatorShare },
         ...editMembers.map((m) => {
@@ -465,13 +604,13 @@ export default function HomeScreen() {
         }),
       ];
       const { error: memberError } = await supabase.from("split_members").upsert(memberRows, { onConflict: "split_id,profile_id" });
-      if (memberError) Alert.alert("Partial save", "Split details saved but members could not be updated.");
+      if (memberError) { Alert.alert("Error", "Split members could not be saved."); return; }
       await loadSplits(); closeEditModal(); setSelectedSplit(null);
     } finally { setIsSaving(false); }
   };
 
   const addMemberToEdit = (friend: AvailableFriend) => {
-    setEditMembers((prev) => [...prev, { id: friend.id, full_name: friend.full_name, username: friend.username, shareAmount: 0, shareAmountInput: "0.00" }]);
+    setEditMembers((prev) => [...prev, { id: friend.id, full_name: friend.full_name, username: friend.username, avatarUrl: friend.avatarUrl, shareAmount: 0, shareAmountInput: "0.00" }]);
     setAvailableFriends((prev) => prev.filter((f) => f.id !== friend.id));
   };
 
@@ -482,7 +621,24 @@ export default function HomeScreen() {
   };
 
   const updateMemberShare = (memberId: string, value: string) => {
-    setEditMembers((prev) => prev.map((m) => m.id === memberId ? { ...m, shareAmountInput: value, shareAmount: parseFloat(value) || 0 } : m));
+    const cleaned = cleanNumberInput(value);
+
+    setEditMembers((prev) => {
+      if (cleaned === "" || cleaned === ".") {
+        return prev.map((m) => m.id === memberId ? { ...m, shareAmountInput: cleaned, shareAmount: 0 } : m);
+      }
+
+      const usedByOthers = prev.reduce((sum, member) => {
+        if (member.id === memberId) return sum;
+        return sum + (parseFloat(member.shareAmountInput) || 0);
+      }, 0);
+      const requestedAmount = parseFloat(cleaned) || 0;
+      const maxAmount = totalAmount > 0 ? Math.max(0, totalAmount - usedByOthers) : requestedAmount;
+      const nextAmount = Math.min(requestedAmount, maxAmount);
+      const nextInput = requestedAmount > maxAmount ? formatClampedNumber(nextAmount) : cleaned;
+
+      return prev.map((m) => m.id === memberId ? { ...m, shareAmountInput: nextInput, shareAmount: nextAmount } : m);
+    });
   };
 
   const deleteSplit = async (splitToDelete?: Split) => {
@@ -604,15 +760,85 @@ export default function HomeScreen() {
     );
   };
 
+  const detailOwner = detailSplit?.friends.find((friend) => friend.id === detailSplit.creator_id);
+  const detailOwnerName = currentUserId === detailSplit?.creator_id
+    ? "You"
+    : detailOwner?.name || detailSplit?.creatorName || detailSplit?.creatorUsername || "Owner";
+  const detailOwnerHandle = detailSplit?.creatorUsername ? `@${detailSplit.creatorUsername}` : detailSplit?.creatorName || "Unknown";
+  const detailOtherOwed = detailSplit
+    ? detailSplit.friends
+        .filter((friend) => friend.id !== detailSplit.creator_id)
+        .reduce((sum, friend) => sum + Math.abs(Math.min(Number(friend.balance ?? 0), 0)), 0)
+      + (currentUserId !== detailSplit.creator_id ? Math.abs(Math.min(detailSplit.myBalance, 0)) : 0)
+    : 0;
+  const detailOwnerShare = detailSplit
+    ? Math.max(0, Number(detailSplit.total_amount ?? 0) - detailOtherOwed)
+    : 0;
+  const detailMyAmount = detailSplit ? Math.abs(detailSplit.myBalance) : 0;
+  const detailMyLabel = detailSplit
+    ? currentUserId === detailSplit.creator_id
+      ? detailSplit.myBalance > BALANCE_EPSILON
+        ? "You are owed"
+        : "Your balance"
+      : detailSplit.myBalance < -BALANCE_EPSILON
+        ? "You owe"
+        : "Your balance"
+    : "Your balance";
+  const detailMemberRows = detailSplit
+    ? [
+        {
+          id: detailSplit.creator_id,
+          name: detailOwnerName,
+          role: "Owner",
+          amount: detailOwnerShare,
+          label: "Owner share",
+          tone: "accent" as const,
+          avatarUrl: detailOwner?.avatarUrl || detailSplit.creatorAvatarUrl || "",
+        },
+        ...(currentUserId && currentUserId !== detailSplit.creator_id
+          ? [{
+              id: currentUserId,
+              name: "You",
+              role: "Member",
+              amount: Math.abs(detailSplit.myBalance),
+              label: detailSplit.myBalance < -BALANCE_EPSILON ? "Owes" : "Settled",
+              tone: detailSplit.myBalance < -BALANCE_EPSILON ? "red" as const : "muted" as const,
+              avatarUrl: "",
+            }]
+          : []),
+        ...detailSplit.friends
+          .filter((friend) => friend.id !== detailSplit.creator_id)
+          .map((friend) => {
+            const amount = Math.abs(Number(friend.balance ?? 0));
+            const isSettled = amount <= BALANCE_EPSILON;
+
+            return {
+              id: friend.id,
+              name: friend.name || "Unknown",
+              role: "Member",
+              amount,
+              label: isSettled ? "Settled" : "Owes",
+              tone: isSettled ? "muted" as const : "red" as const,
+              avatarUrl: friend.avatarUrl || "",
+            };
+          }),
+      ]
+    : [];
+
   return (
-    <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
     <SafeAreaView style={styles.safe}>
-      <FloatingOrb style={styles.orb1} />
-      <FloatingOrb style={styles.orb2} />
+      <AppBackground />
+      {backgroundMode === "default" ? (
+        <>
+          <FloatingOrb style={styles.orb1} />
+          <FloatingOrb style={styles.orb2} />
+        </>
+      ) : null}
 
       <ScrollView
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
+        onScrollBeginDrag={Keyboard.dismiss}
         keyboardShouldPersistTaps="never"
         keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
         refreshControl={
@@ -629,7 +855,7 @@ export default function HomeScreen() {
         <Animated.View style={[styles.header, headerAnim]}>
           <View style={styles.headerLeft}>
             <View style={styles.sparkleWrap}>
-              <Sparkles size={18} color={C.accent} />
+              <House size={18} color={C.accent} />
             </View>
             <View>
               <Text style={styles.headerEyebrow}>Overview</Text>
@@ -642,22 +868,66 @@ export default function HomeScreen() {
         </Animated.View>
 
         {/* ── SUMMARY CARDS ── */}
-        <Animated.View style={[styles.summaryRow, summaryAnim]}>
-          <View style={[styles.summaryCard, { borderColor: C.green + "44" }]}>
+        <View style={styles.summaryRow}>
+          <Animated.View style={[styles.summaryCard, { borderColor: C.green + "44" }, owedSummaryAnim]}>
             <TrendingUp size={14} color={C.green} />
             <Text style={styles.summaryLabel}>You are owed</Text>
             <Text style={[styles.summaryValue, { color: C.green }]}>${totalOwed.toFixed(2)}</Text>
-          </View>
-          <View style={[styles.summaryCard, { borderColor: C.red + "44" }]}>
+          </Animated.View>
+          <Animated.View style={[styles.summaryCard, { borderColor: C.red + "44" }, oweSummaryAnim]}>
             <TrendingUp size={14} color={C.red} style={{ transform: [{ rotate: "180deg" }] }} />
             <Text style={styles.summaryLabel}>You owe</Text>
             <Text style={[styles.summaryValue, { color: C.red }]}>${totalOwe.toFixed(2)}</Text>
-          </View>
-          <View style={[styles.summaryCard, { borderColor: C.accent + "44" }]}>
+          </Animated.View>
+          <Animated.View style={[styles.summaryCard, { borderColor: C.accent + "44" }, splitsSummaryAnim]}>
             <Receipt size={14} color={C.accent} />
             <Text style={styles.summaryLabel}>Splits</Text>
             <Text style={[styles.summaryValue, { color: C.accent }]}>{splits.length}</Text>
-          </View>
+          </Animated.View>
+        </View>
+
+        {/* ── FILTERS ── */}
+        <Animated.View style={[styles.filterPanel, filterAnim]}>
+          <Pressable style={styles.filterButton} onPress={() => setFilterOpen((open) => !open)}>
+            <View style={styles.filterTitleRow}>
+              <View style={styles.filterIconWrap}>
+                <SlidersHorizontal size={15} color={C.accentBright} />
+              </View>
+              <View>
+                <Text style={styles.filterEyebrow}>Filter</Text>
+                <Text style={styles.filterTitle}>Show: {activeFilterOption.label}</Text>
+              </View>
+            </View>
+            <View style={styles.filterButtonRight}>
+              <Text style={styles.filterCount}>{filteredSplits.length}/{splits.length}</Text>
+              <Animated.View style={[styles.filterChevron, filterChevronAnim]}>
+                <ChevronDown size={16} color={C.accentBright} />
+              </Animated.View>
+            </View>
+          </Pressable>
+
+          <Animated.View style={[styles.filterOptionsWrap, filterOptionsAnim]} pointerEvents={filterOpen ? "auto" : "none"}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterPills}>
+              {FILTER_OPTIONS.map((option) => {
+                const isActive = activeFilter === option.id;
+                return (
+                  <Pressable
+                    key={option.id}
+                    style={[styles.filterPill, isActive && styles.filterPillActive]}
+                    onPress={() => {
+                      setActiveFilter(option.id);
+                      setFilterOpen(false);
+                    }}
+                  >
+                    <Text style={[styles.filterPillLabel, isActive && styles.filterPillLabelActive]}>{option.label}</Text>
+                    <Text style={[styles.filterPillMeta, isActive && styles.filterPillMetaActive]}>
+                      {filterCounts[option.id]} - {option.hint}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </Animated.View>
         </Animated.View>
 
         {/* ── SPLITS LIST ── */}
@@ -677,12 +947,27 @@ export default function HomeScreen() {
           </Animated.View>
         )}
 
-        <Animated.View style={listAnim}>
-          {splits.map((split) => (
+        {!loading && splits.length > 0 && filteredSplits.length === 0 && (
+          <Animated.View style={[styles.emptyState, contentAnim]}>
+            <View style={styles.emptyIcon}>
+              <SlidersHorizontal size={28} color={C.textMuted} />
+            </View>
+            <Text style={styles.emptyTitle}>Nothing here yet</Text>
+            <Text style={styles.emptySubtitle}>
+              No splits match {activeFilterOption.label}. Try All to see everything.
+            </Text>
+          </Animated.View>
+        )}
+
+        <View>
+          {filteredSplits.map((split, index) => (
             <SplitCard
-              key={split.id}
+              key={`${activeFilter}-${split.id}`}
               split={split}
               currentUserId={currentUserId}
+              entryDelay={280 + Math.min(index, 6) * 45}
+              isFocused={isFocused}
+              onOpenDetails={setDetailSplit}
               onMenuOpen={openActionMenu}
               onDelete={confirmDeleteSplit}
               onRequestPayment={handleRequestPayment}
@@ -690,10 +975,90 @@ export default function HomeScreen() {
               styles={styles}
             />
           ))}
-        </Animated.View>
+        </View>
       </ScrollView>
 
       {/* ── ACTION POPOVER ── */}
+      <Modal visible={!!detailSplit} animationType="fade" transparent onRequestClose={() => setDetailSplit(null)}>
+        <Pressable style={styles.detailOverlay} onPress={() => setDetailSplit(null)}>
+          <Pressable style={styles.detailSheet} onPress={(event) => event.stopPropagation()}>
+            {detailSplit ? (
+              <>
+                <View style={styles.detailHandle} />
+                <View style={styles.detailHeader}>
+                  <View style={styles.detailIcon}>
+                    <Receipt size={18} color={C.accentBright} />
+                  </View>
+                  <View style={styles.detailTitleBlock}>
+                    <Text style={styles.detailEyebrow}>Split details</Text>
+                    <Text style={styles.detailTitle}>{detailSplit.title}</Text>
+                  </View>
+                  <Pressable style={styles.detailCloseButton} onPress={() => setDetailSplit(null)}>
+                    <Text style={styles.detailCloseText}>Close</Text>
+                  </Pressable>
+                </View>
+
+                <View style={styles.detailHero}>
+                  <View>
+                    <Text style={styles.detailHeroLabel}>Owner</Text>
+                    <Text style={styles.detailHeroValue}>{detailOwnerName}</Text>
+                    <Text style={styles.detailHeroMeta}>{detailOwnerHandle}</Text>
+                  </View>
+                  <View style={styles.detailTotalPill}>
+                    <Text style={styles.detailTotalLabel}>Total</Text>
+                    <Text style={styles.detailTotalValue}>${Number(detailSplit.total_amount).toFixed(2)}</Text>
+                  </View>
+                </View>
+
+                <View style={styles.detailStatsRow}>
+                  <View style={styles.detailStatCard}>
+                    <Text style={styles.detailStatLabel}>Owner share</Text>
+                    <Text style={[styles.detailStatValue, { color: C.accentBright }]}>${detailOwnerShare.toFixed(2)}</Text>
+                  </View>
+                  <View style={styles.detailStatCard}>
+                    <Text style={styles.detailStatLabel}>Others owe</Text>
+                    <Text style={[styles.detailStatValue, { color: C.red }]}>${detailOtherOwed.toFixed(2)}</Text>
+                  </View>
+                  <View style={styles.detailStatCard}>
+                    <Text style={styles.detailStatLabel}>{detailMyLabel}</Text>
+                    <Text style={[styles.detailStatValue, { color: detailSplit.myBalance < -BALANCE_EPSILON ? C.red : detailSplit.myBalance > BALANCE_EPSILON ? C.green : C.textPrimary }]}>
+                      ${detailMyAmount.toFixed(2)}
+                    </Text>
+                  </View>
+                </View>
+
+                <Text style={styles.detailSectionTitle}>Who pays what</Text>
+                <ScrollView style={styles.detailMembersList} contentContainerStyle={styles.detailMembersContent} showsVerticalScrollIndicator={false}>
+                  {detailMemberRows.map((member) => {
+                    const amountColor = member.tone === "red" ? C.red : member.tone === "accent" ? C.accentBright : C.textSecondary;
+
+                    return (
+                      <View key={`${member.id}-${member.role}`} style={styles.detailMemberRow}>
+                        <View style={styles.detailMemberAvatar}>
+                          {member.avatarUrl ? (
+                            <Image source={{ uri: member.avatarUrl }} style={styles.avatarImage} resizeMode="cover" />
+                          ) : (
+                            <Text style={styles.detailMemberAvatarText}>{member.name.charAt(0).toUpperCase()}</Text>
+                          )}
+                        </View>
+                        <View style={styles.detailMemberBody}>
+                          <Text style={styles.detailMemberName}>{member.name}</Text>
+                          <Text style={styles.detailMemberRole}>{member.role}</Text>
+                        </View>
+                        <View style={styles.detailMemberAmountBlock}>
+                          <Text style={[styles.detailMemberAmount, { color: amountColor }]}>${member.amount.toFixed(2)}</Text>
+                          <Text style={styles.detailMemberLabel}>{member.label}</Text>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </ScrollView>
+              </>
+            ) : null}
+          </Pressable>
+        </Pressable>
+      </Modal>
+
       <Modal visible={actionMenuVisible} animationType="fade" transparent onRequestClose={closeActionMenu}>
         <Pressable style={styles.popoverOverlay} onPress={closeActionMenu}>
           <Pressable style={[styles.popoverMenu, { top: menuPosition.y, left: menuPosition.x }]} onPress={(e) => e.stopPropagation()}>
@@ -741,7 +1106,7 @@ export default function HomeScreen() {
                 <TextInput
                   style={[styles.modalInput, { flex: 1, borderWidth: 0 }]}
                   value={editTotal}
-                  onChangeText={setEditTotal}
+                  onChangeText={(value) => setEditTotal(cleanNumberInput(value))}
                   placeholder="0.00"
                   placeholderTextColor={C.textMuted}
                   keyboardType="numeric"
@@ -751,7 +1116,7 @@ export default function HomeScreen() {
               {totalAmount > 0 && (
                 <View style={styles.allocationRow}>
                   <Text style={styles.allocationText}>Your share: <Text style={{ color: C.accentBright }}>${creatorShare.toFixed(2)}</Text></Text>
-                  <Text style={styles.allocationText}>Allocated: <Text style={{ color: C.green }}>${allocated.toFixed(2)}</Text> / ${totalAmount.toFixed(2)}</Text>
+                  <Text style={styles.allocationText}>Allocated: <Text style={{ color: editOverAllocated ? C.red : C.green }}>${allocated.toFixed(2)}</Text> / ${totalAmount.toFixed(2)}</Text>
                 </View>
               )}
 
@@ -765,7 +1130,11 @@ export default function HomeScreen() {
                       {editMembers.map((member) => (
                         <View key={member.id} style={styles.memberRow}>
                           <View style={styles.memberAvatar}>
-                            <Text style={styles.memberAvatarText}>{member.full_name?.charAt(0)?.toUpperCase()}</Text>
+                            {member.avatarUrl ? (
+                              <Image source={{ uri: member.avatarUrl }} style={styles.avatarImage} resizeMode="cover" />
+                            ) : (
+                              <Text style={styles.memberAvatarText}>{member.full_name?.charAt(0)?.toUpperCase()}</Text>
+                            )}
                           </View>
                           <View style={{ flex: 1 }}>
                             <Text style={styles.memberName}>{member.full_name}</Text>
@@ -796,6 +1165,13 @@ export default function HomeScreen() {
                       <View style={styles.friendChips}>
                         {availableFriends.map((friend) => (
                           <Pressable key={friend.id} style={styles.friendChip} onPress={() => addMemberToEdit(friend)}>
+                            <View style={styles.friendChipAvatar}>
+                              {friend.avatarUrl ? (
+                                <Image source={{ uri: friend.avatarUrl }} style={styles.avatarImage} resizeMode="cover" />
+                              ) : (
+                                <Text style={styles.friendChipAvatarText}>{friend.full_name.charAt(0).toUpperCase()}</Text>
+                              )}
+                            </View>
                             <Text style={styles.friendChipText}>{friend.full_name} +</Text>
                           </Pressable>
                         ))}
@@ -824,7 +1200,6 @@ export default function HomeScreen() {
         </Pressable>
       </Modal>
     </SafeAreaView>
-    </TouchableWithoutFeedback>
   );
 }
 
@@ -833,8 +1208,8 @@ return StyleSheet.create({
   safe: { flex: 1, backgroundColor: C.bg },
   scroll: { paddingHorizontal: 16, paddingTop: 20, paddingBottom: 140 },
 
-  orb1: { position: "absolute", width: 300, height: 300, borderRadius: 150, backgroundColor: "#7c3aed", top: -100, right: -80 },
-  orb2: { position: "absolute", width: 220, height: 220, borderRadius: 110, backgroundColor: "#1d4ed8", bottom: 100, left: -70 },
+  orb1: { position: "absolute", width: 300, height: 300, borderRadius: 150, backgroundColor: C.orbPrimary, top: -100, right: -80 },
+  orb2: { position: "absolute", width: 220, height: 220, borderRadius: 110, backgroundColor: C.orbSecondary, bottom: 100, left: -70 },
 
   // header
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 20 },
@@ -850,6 +1225,32 @@ return StyleSheet.create({
   summaryCard: { flex: 1, backgroundColor: C.card, borderRadius: 18, padding: 12, alignItems: "center", borderWidth: 1, gap: 4 },
   summaryLabel: { fontSize: 9, color: C.textSecondary, fontWeight: "600", textTransform: "uppercase", letterSpacing: 0.6, textAlign: "center" },
   summaryValue: { fontSize: 16, fontWeight: "800" },
+  filterPanel: {
+    backgroundColor: C.card,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: C.border,
+    padding: 12,
+    marginBottom: 18,
+    overflow: "hidden",
+  },
+  filterButton: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+  filterButtonRight: { flexDirection: "row", alignItems: "center", gap: 8 },
+  filterChevron: { width: 30, height: 30, borderRadius: 10, backgroundColor: C.accentDim, borderWidth: 1, borderColor: C.accent + "33", alignItems: "center", justifyContent: "center" },
+  filterTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 12 },
+  filterTitleRow: { flexDirection: "row", alignItems: "center", gap: 10, flex: 1 },
+  filterIconWrap: { width: 34, height: 34, borderRadius: 10, backgroundColor: C.accentDim, borderWidth: 1, borderColor: C.accent + "44", alignItems: "center", justifyContent: "center" },
+  filterEyebrow: { fontSize: 10, color: C.textSecondary, fontWeight: "700", textTransform: "uppercase", letterSpacing: 1 },
+  filterTitle: { fontSize: 15, color: C.textPrimary, fontWeight: "800", marginTop: 1 },
+  filterCount: { color: C.accentBright, fontSize: 12, fontWeight: "800", backgroundColor: C.accentDim, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6, overflow: "hidden" },
+  filterOptionsWrap: { overflow: "hidden" },
+  filterPills: { gap: 8, paddingRight: 4 },
+  filterPill: { minWidth: 112, backgroundColor: C.surface, borderRadius: 14, borderWidth: 1, borderColor: C.border, paddingHorizontal: 12, paddingVertical: 10 },
+  filterPillActive: { backgroundColor: C.accent, borderColor: C.accentBright },
+  filterPillLabel: { color: C.textPrimary, fontSize: 13, fontWeight: "800" },
+  filterPillLabelActive: { color: "#fff" },
+  filterPillMeta: { color: C.textMuted, fontSize: 10, fontWeight: "700", marginTop: 3 },
+  filterPillMetaActive: { color: "rgba(255,255,255,0.82)" },
 
   // split card
   card: {
@@ -883,10 +1284,48 @@ return StyleSheet.create({
   cardFriends: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14, paddingBottom: 12, flexWrap: "wrap" },
   friendsLabel: { fontSize: 10, color: C.textMuted },
   friendPills: { flexDirection: "row", flexWrap: "wrap", gap: 4 },
-  friendPill: { backgroundColor: C.accentDim, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2, borderWidth: 1, borderColor: C.accent + "33" },
+  friendPill: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: C.accentDim, borderRadius: 12, paddingLeft: 3, paddingRight: 8, paddingVertical: 2, borderWidth: 1, borderColor: C.accent + "33" },
+  friendPillAvatar: { width: 18, height: 18, borderRadius: 9, backgroundColor: C.surface, alignItems: "center", justifyContent: "center", overflow: "hidden" },
+  friendPillAvatarText: { color: C.accentBright, fontSize: 9, fontWeight: "900" },
   friendPillText: { fontSize: 10, color: C.accentBright, fontWeight: "600" },
   friendPillExtra: { backgroundColor: C.surface, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 },
   friendPillExtraText: { fontSize: 10, color: C.textSecondary },
+
+  // details modal
+  detailOverlay: { flex: 1, backgroundColor: C.mode === "dark" ? `${C.bg}d9` : "rgba(24,24,38,0.24)", justifyContent: "flex-end", padding: 14 },
+  detailSheet: { maxHeight: "82%", backgroundColor: C.card, borderRadius: 26, borderWidth: 1, borderColor: C.border, padding: 18, shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 24, shadowOffset: { width: 0, height: 10 }, elevation: 12 },
+  detailHandle: { alignSelf: "center", width: 42, height: 4, borderRadius: 999, backgroundColor: C.borderBright, marginBottom: 16 },
+  detailHeader: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 16 },
+  detailIcon: { width: 42, height: 42, borderRadius: 14, backgroundColor: C.accentDim, borderWidth: 1, borderColor: C.accent + "44", alignItems: "center", justifyContent: "center" },
+  detailTitleBlock: { flex: 1, minWidth: 0 },
+  detailEyebrow: { color: C.textSecondary, fontSize: 10, fontWeight: "800", textTransform: "uppercase", letterSpacing: 1 },
+  detailTitle: { color: C.textPrimary, fontSize: 22, fontWeight: "900", letterSpacing: -0.4, marginTop: 2 },
+  detailCloseButton: { backgroundColor: C.surface, borderRadius: 12, borderWidth: 1, borderColor: C.border, paddingHorizontal: 12, paddingVertical: 9 },
+  detailCloseText: { color: C.textSecondary, fontSize: 12, fontWeight: "800" },
+  detailHero: { flexDirection: "row", justifyContent: "space-between", gap: 12, backgroundColor: C.surface, borderRadius: 18, borderWidth: 1, borderColor: C.border, padding: 14, marginBottom: 12 },
+  detailHeroLabel: { color: C.textMuted, fontSize: 10, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.8 },
+  detailHeroValue: { color: C.textPrimary, fontSize: 16, fontWeight: "900", marginTop: 4 },
+  detailHeroMeta: { color: C.accentBright, fontSize: 12, fontWeight: "700", marginTop: 2 },
+  detailTotalPill: { alignItems: "flex-end", justifyContent: "center", backgroundColor: C.accentDim, borderRadius: 14, borderWidth: 1, borderColor: C.accent + "44", paddingHorizontal: 12, paddingVertical: 8 },
+  detailTotalLabel: { color: C.textSecondary, fontSize: 10, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.8 },
+  detailTotalValue: { color: C.accentBright, fontSize: 18, fontWeight: "900", marginTop: 2 },
+  detailStatsRow: { flexDirection: "row", gap: 8, marginBottom: 16 },
+  detailStatCard: { flex: 1, backgroundColor: C.surface, borderRadius: 16, borderWidth: 1, borderColor: C.border, padding: 10, minHeight: 74, justifyContent: "space-between" },
+  detailStatLabel: { color: C.textSecondary, fontSize: 9, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.5 },
+  detailStatValue: { fontSize: 15, fontWeight: "900", marginTop: 8 },
+  detailSectionTitle: { color: C.textPrimary, fontSize: 16, fontWeight: "900", marginBottom: 10 },
+  detailMembersList: { maxHeight: 300 },
+  detailMembersContent: { gap: 9, paddingBottom: 4 },
+  detailMemberRow: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: C.surface, borderRadius: 16, borderWidth: 1, borderColor: C.border, padding: 12 },
+  detailMemberAvatar: { width: 40, height: 40, borderRadius: 13, backgroundColor: C.accentDim, borderWidth: 1, borderColor: C.accent + "33", alignItems: "center", justifyContent: "center", overflow: "hidden" },
+  avatarImage: { width: "100%", height: "100%" },
+  detailMemberAvatarText: { color: C.accentBright, fontSize: 15, fontWeight: "900" },
+  detailMemberBody: { flex: 1, minWidth: 0 },
+  detailMemberName: { color: C.textPrimary, fontSize: 14, fontWeight: "800" },
+  detailMemberRole: { color: C.textSecondary, fontSize: 11, fontWeight: "700", marginTop: 2 },
+  detailMemberAmountBlock: { alignItems: "flex-end" },
+  detailMemberAmount: { fontSize: 15, fontWeight: "900" },
+  detailMemberLabel: { color: C.textMuted, fontSize: 10, fontWeight: "800", marginTop: 2, textTransform: "uppercase" },
 
   // swipe delete
   swipeDelete: { width: 88, marginBottom: 14, borderRadius: 20, backgroundColor: C.red, alignItems: "center", justifyContent: "center", gap: 4 },
@@ -909,7 +1348,7 @@ return StyleSheet.create({
   popoverDivider: { height: 1, backgroundColor: C.border, marginHorizontal: 10 },
 
   // edit modal
-  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", paddingHorizontal: 16 },
+  modalOverlay: { flex: 1, backgroundColor: C.mode === "dark" ? `${C.bg}d9` : "rgba(24,24,38,0.24)", justifyContent: "center", paddingHorizontal: 16 },
   modalKeyboardWrap: { flex: 1, justifyContent: "center" },
   modalSheet: { backgroundColor: C.card, borderRadius: 28, padding: 20, paddingBottom: 24, maxHeight: "78%", borderWidth: 1, borderColor: C.border, shadowColor: "#000", shadowOpacity: 0.22, shadowRadius: 24, shadowOffset: { width: 0, height: 10 }, elevation: 10 },
   modalSheetContent: {},
@@ -923,7 +1362,7 @@ return StyleSheet.create({
 
   // member row
   memberRow: { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: C.surface, borderRadius: 12, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: C.border },
-  memberAvatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: C.accentDim, justifyContent: "center", alignItems: "center" },
+  memberAvatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: C.accentDim, justifyContent: "center", alignItems: "center", overflow: "hidden" },
   memberAvatarText: { color: C.accentBright, fontWeight: "700" },
   memberName: { fontSize: 14, fontWeight: "600", color: C.textPrimary },
   memberHandle: { fontSize: 11, color: C.textSecondary },
@@ -935,7 +1374,9 @@ return StyleSheet.create({
 
   // friend chips
   friendChips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  friendChip: { backgroundColor: C.accentDim, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7, borderWidth: 1, borderColor: C.accent + "44" },
+  friendChip: { flexDirection: "row", alignItems: "center", gap: 7, backgroundColor: C.accentDim, borderRadius: 20, paddingLeft: 5, paddingRight: 12, paddingVertical: 5, borderWidth: 1, borderColor: C.accent + "44" },
+  friendChipAvatar: { width: 24, height: 24, borderRadius: 12, backgroundColor: C.surface, justifyContent: "center", alignItems: "center", overflow: "hidden" },
+  friendChipAvatarText: { color: C.accentBright, fontSize: 11, fontWeight: "900" },
   friendChipText: { color: C.accentBright, fontSize: 13, fontWeight: "600" },
   noFriendsText: { marginTop: 16, color: C.textMuted, fontSize: 13, textAlign: "center" },
 

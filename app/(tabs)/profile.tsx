@@ -1,40 +1,64 @@
-import { supabase } from "@/lib/supabaseClient";
+import { AppBackground } from "@/lib/app-background";
 import { useAppTheme } from "@/lib/app-theme";
+import { AvatarDecoration } from "@/lib/avatar-decoration";
+import { supabase } from "@/lib/supabaseClient";
 import { useIsFocused } from "@react-navigation/native";
 import { router } from "expo-router";
-import { Check, ChevronDown, ChevronUp, Search, Settings2, Sparkles, UserPlus, X } from "lucide-react-native";
+import { Check, ChevronDown, ChevronUp, Search, Settings2, UserMinus, UserPlus, UserRound, X } from "lucide-react-native";
 import { useEffect, useRef, useState } from "react";
-import { Animated, Keyboard, LayoutAnimation, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableWithoutFeedback, UIManager, View } from "react-native";
+import { Alert, Animated, Easing, Image, Keyboard, LayoutAnimation, Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, UIManager, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 function useFadeSlide(delay = 0, isActive = true) {
+  const scale = useRef(new Animated.Value(0.82)).current;
   const opacity = useRef(new Animated.Value(0)).current;
-  const translateY = useRef(new Animated.Value(22)).current;
+  const translateY = useRef(new Animated.Value(24)).current;
 
   useEffect(() => {
     if (!isActive) {
+      scale.setValue(0.82);
       opacity.setValue(0);
-      translateY.setValue(22);
+      translateY.setValue(24);
       return;
     }
 
+    scale.setValue(0.82);
     opacity.setValue(0);
-    translateY.setValue(22);
+    translateY.setValue(24);
 
-    Animated.parallel([
-      Animated.timing(opacity, { toValue: 1, duration: 480, delay, useNativeDriver: true }),
-      Animated.spring(translateY, { toValue: 0, delay, tension: 80, friction: 12, useNativeDriver: true }),
+    Animated.sequence([
+      Animated.delay(delay),
+      Animated.parallel([
+        Animated.spring(scale, {
+          toValue: 1,
+          damping: 14,
+          stiffness: 160,
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacity, {
+          toValue: 1,
+          duration: 280,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.spring(translateY, {
+          toValue: 0,
+          damping: 14,
+          stiffness: 160,
+          useNativeDriver: true,
+        }),
+      ]),
     ]).start();
-  }, [delay, isActive, opacity, translateY]);
+  }, [delay, isActive, scale, opacity, translateY]);
 
-  return { opacity, transform: [{ translateY }] };
+  return { opacity, transform: [{ scale }, { translateY }] };
 }
 
 function FloatingOrb({ style }: { style?: any }) {
   const scale = useRef(new Animated.Value(1)).current;
   const opacity = useRef(new Animated.Value(0.18)).current;
   useEffect(() => {
-    Animated.loop(
+    const loop = Animated.loop(
       Animated.sequence([
         Animated.parallel([
           Animated.timing(scale, { toValue: 1.18, duration: 3200, useNativeDriver: true }),
@@ -45,7 +69,10 @@ function FloatingOrb({ style }: { style?: any }) {
           Animated.timing(opacity, { toValue: 0.18, duration: 3200, useNativeDriver: true }),
         ]),
       ])
-    ).start();
+    );
+
+    loop.start();
+    return () => loop.stop();
   }, [opacity, scale]);
   return <Animated.View pointerEvents="none" style={[style, { opacity, transform: [{ scale }] }]} />;
 }
@@ -121,36 +148,94 @@ function SectionHeader({
   );
 }
 
+async function loadMutualFriendCounts(currentFriendIds: Set<string>, profileIds: string[]) {
+  if (currentFriendIds.size === 0 || profileIds.length === 0) return new Map<string, number>();
+
+  const { data, error } = await supabase
+    .from("friends")
+    .select("user_id, friend_id")
+    .in("user_id", profileIds);
+
+  if (error) {
+    console.error("Error loading mutual friends:", error);
+    return new Map<string, number>();
+  }
+
+  const counts = new Map<string, number>();
+  data?.forEach((row: any) => {
+    if (!currentFriendIds.has(row.friend_id)) return;
+    counts.set(row.user_id, (counts.get(row.user_id) ?? 0) + 1);
+  });
+
+  return counts;
+}
+
 export default function ProfileScreen() {
   const isFocused = useIsFocused();
-  const { palette: C } = useAppTheme();
+  const { palette: C, backgroundMode } = useAppTheme();
   const styles = createStyles(C);
   const scrollRef = useRef<ScrollView>(null);
   const friendsSectionY = useRef(0);
   const [searchText, setSearchText] = useState("");
-  const [profile, setProfile] = useState({ name: "", username: "", email: "" });
+  const [profile, setProfile] = useState({ name: "", username: "", email: "", avatarUrl: "", avatarDecoration: "none", pronouns: "" });
   const [friends, setFriends] = useState<any[]>([]);
   const [sentRequests, setSentRequests] = useState<string[]>([]);
-  const [pendingRequests, setPendingRequests] = useState<any[]>([]);
   const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [friendSuggestions, setFriendSuggestions] = useState<any[]>([]);
   const [youreOwed, setYoureOwed] = useState(0);
   const [youOwe, setYouOwe] = useState(0);
   const [friendsExpanded, setFriendsExpanded] = useState(true);
+  const [removingFriendId, setRemovingFriendId] = useState<string | null>(null);
+  const [previewUser, setPreviewUser] = useState<any | null>(null);
+  const [previewVisible, setPreviewVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const previewAnim = useRef(new Animated.Value(0)).current;
 
-  const headerAnim = useFadeSlide(0, isFocused);
-  const heroAnim = useFadeSlide(80, isFocused);
-  const searchAnim = useFadeSlide(160, isFocused);
-  const pendingAnim = useFadeSlide(240, isFocused);
-  const friendsAnim = useFadeSlide(320, isFocused);
-  const logoutAnim = useFadeSlide(400, isFocused);
-  const logoutScale = useRef(new Animated.Value(1)).current;
-  const farewellOpacity = useRef(new Animated.Value(0)).current;
-  const farewellScale = useRef(new Animated.Value(0.94)).current;
-  const farewellSlide = useRef(new Animated.Value(20)).current;
-  const farewellGlow = useRef(new Animated.Value(1)).current;
-  const farewellProgress = useRef(new Animated.Value(0)).current;
-  const [moneyRequests, setMoneyRequests] = useState<any[]>([]);
+  const headerAnim = useFadeSlide(60, isFocused);
+  const heroAnim = useFadeSlide(140, isFocused);
+  const searchAnim = useFadeSlide(210, isFocused);
+  const friendsAnim = useFadeSlide(280, isFocused);
+
+  const openProfilePreview = (user: any) => {
+    setPreviewUser(user);
+    setPreviewVisible(true);
+    previewAnim.stopAnimation();
+    previewAnim.setValue(0);
+    Animated.spring(previewAnim, {
+      toValue: 1,
+      damping: 16,
+      stiffness: 190,
+      mass: 0.85,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  const closeProfilePreview = () => {
+    previewAnim.stopAnimation();
+    Animated.timing(previewAnim, {
+      toValue: 0,
+      duration: 190,
+      easing: Easing.in(Easing.cubic),
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (!finished) return;
+      setPreviewVisible(false);
+      setPreviewUser(null);
+    });
+  };
+
+  const previewScale = previewAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.88, 1],
+  });
+  const previewTranslateY = previewAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [34, 0],
+  });
+  const previewGlowScale = previewAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.72, 1.08],
+  });
 
   useEffect(() => {
     if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -163,26 +248,19 @@ export default function ProfileScreen() {
     const user = session?.user;
     if (!user) return console.log("No user session found");
     if (sessionError) return console.error("Error getting session:", sessionError);
-    const { data, error } = await supabase.from("profiles").select("full_name, username, email").eq("id", user.id).single();
+    const { data, error } = await supabase.from("profiles").select("*").eq("id", user.id).single();
     if (error) return console.error("Error loading profile:", error);
-    if (data) setProfile({ name: data.full_name || "", username: data.username || "", email: data.email || "" });
-  };
-
-  const loadPendingRequests = async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    const currentUserId = session?.user?.id;
-    if (!currentUserId) return;
-    const { data, error } = await supabase
-      .from("friend_requests")
-      .select(`id, requester_id, requester:profiles!requester_id ( full_name, username )`)
-      .eq("addressee_id", currentUserId)
-      .eq("status", "pending");
-    if (error) return console.error("Error loading pending requests:", error);
-    setPendingRequests(data?.map((request: any) => ({
-      id: request.id,
-      name: request.requester?.full_name || "",
-      username: request.requester?.username || "",
-    })) ?? []);
+    const metadata = user.user_metadata ?? {};
+    if (data) {
+      setProfile({
+        name: data.full_name || metadata.full_name || "",
+        username: data.username || metadata.username || "",
+        email: data.email || user.email || "",
+        avatarUrl: data.avatar_url || metadata.avatar_url || "",
+        avatarDecoration: data.avatar_decoration || metadata.avatar_decoration || "none",
+        pronouns: data.pronouns || metadata.pronouns || "",
+      });
+    }
   };
 
   const loadSentRequests = async () => {
@@ -200,13 +278,21 @@ export default function ProfileScreen() {
     if (!currentUserId) return;
     const { data, error } = await supabase
       .from("friends")
-      .select(`friend_id, friend:profiles!friend_id ( id, full_name, username )`)
+      .select(`friend_id, friend:profiles!friend_id ( id, full_name, username, avatar_url, avatar_decoration, pronouns )`)
       .eq("user_id", currentUserId);
     if (error) return console.error("Error loading friends:", error);
+    const friendIds = (data ?? []).map((item: any) => item.friend?.id).filter(Boolean);
+    const mutualCounts = await loadMutualFriendCounts(new Set(friendIds), friendIds);
     setFriends(data?.map((item: any) => ({
       id: item.friend?.id,
       name: item.friend?.full_name || "",
       username: item.friend?.username || "",
+      avatarUrl: item.friend?.avatar_url || "",
+      avatarDecoration: item.friend?.avatar_decoration || "none",
+      pronouns: item.friend?.pronouns || "",
+      mutualFriends: mutualCounts.get(item.friend?.id) ?? 0,
+      isPending: false,
+      isFriend: true,
     })) ?? []);
   };
 
@@ -242,14 +328,63 @@ export default function ProfileScreen() {
     setYouOwe(oweTotal);
   };
 
+  const loadFriendSuggestions = async () => {
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+    const currentUserId = session?.user?.id;
+    if (!currentUserId) return;
+    if (sessionError) return console.error("Session error:", sessionError);
+
+    const [friendRows, pendingRows, profileRows] = await Promise.all([
+      supabase
+        .from("friends")
+        .select("friend_id")
+        .eq("user_id", currentUserId),
+      supabase
+        .from("friend_requests")
+        .select("addressee_id")
+        .eq("requester_id", currentUserId)
+        .eq("status", "pending"),
+      supabase
+        .from("profiles")
+        .select("id, full_name, username, avatar_url, avatar_decoration, pronouns")
+        .limit(16),
+    ]);
+
+    if (friendRows.error) return console.error("Error loading suggestion friends:", friendRows.error);
+    if (pendingRows.error) return console.error("Error loading suggestion requests:", pendingRows.error);
+    if (profileRows.error) return console.error("Error loading friend suggestions:", profileRows.error);
+
+    const friendIds = new Set((friendRows.data ?? []).map((item: any) => item.friend_id));
+    const pendingIds = new Set((pendingRows.data ?? []).map((item: any) => item.addressee_id));
+    const suggestedUsers =
+      profileRows.data
+        ?.filter((user: any) => user.id !== currentUserId)
+        .filter((user: any) => !friendIds.has(user.id))
+        .filter((user: any) => !pendingIds.has(user.id))
+        .slice(0, 4) ?? [];
+    const mutualCounts = await loadMutualFriendCounts(friendIds, suggestedUsers.map((user: any) => user.id));
+    const formatted = suggestedUsers.map((user: any) => ({
+      id: user.id,
+      name: user.full_name,
+      username: user.username,
+      avatarUrl: user.avatar_url || "",
+      avatarDecoration: user.avatar_decoration || "none",
+      pronouns: user.pronouns || "",
+      mutualFriends: mutualCounts.get(user.id) ?? 0,
+      isPending: false,
+      isFriend: false,
+    }));
+
+    setFriendSuggestions(formatted);
+  };
+
   useEffect(() => {
     if (!isFocused) return;
 
     loadProfile();
-    loadPendingRequests();
-    loadMoneyRequests();
     loadSentRequests();
     loadFriends();
+    loadFriendSuggestions();
     loadBalances();
   }, [isFocused]);
 
@@ -265,8 +400,8 @@ export default function ProfileScreen() {
 
       channel = supabase
         .channel(`profile-money-requests-${currentUserId}`)
+        .on("postgres_changes", { event: "*", schema: "public", table: "profiles", filter: `id=eq.${currentUserId}` }, loadProfile)
         .on("postgres_changes", { event: "*", schema: "public", table: "money_requests", filter: `owner_id=eq.${currentUserId}` }, () => {
-          loadMoneyRequests();
           loadBalances();
         })
         .subscribe();
@@ -286,21 +421,26 @@ export default function ProfileScreen() {
     if (sessionError) return console.error("Session error:", sessionError);
     const currentUserId = session?.user?.id;
     console.log("Current user id:", currentUserId);
-    const { data, error } = await supabase.from("profiles").select("id, full_name, username").ilike("username", `%${searchText}%`);
+    const { data, error } = await supabase.from("profiles").select("id, full_name, username, avatar_url, avatar_decoration, pronouns").ilike("username", `%${searchText}%`);
     if (error) return console.error("Search error:", error);
     console.log("Raw search data:", data);
+    const foundUsers = data?.filter((user) => user.id !== currentUserId) ?? [];
+    const currentFriendIds = new Set(friends.map((friend) => friend.id).filter(Boolean));
+    const mutualCounts = await loadMutualFriendCounts(currentFriendIds, foundUsers.map((user) => user.id));
     const formatted =
-      data
-        ?.filter((user) => user.id !== currentUserId)
+      foundUsers
         .map((user) => ({
           id: user.id,
           name: user.full_name,
           username: user.username,
-          mutualFriends: 0,
+          avatarUrl: user.avatar_url || "",
+          avatarDecoration: user.avatar_decoration || "none",
+          pronouns: user.pronouns || "",
+          mutualFriends: mutualCounts.get(user.id) ?? 0,
           isPending: sentRequests.includes(user.id),
           isFriend: friends.some((friend) => friend.id === user.id),
         }))
-        .filter((user) => !user.isFriend) ?? [];
+        .filter((user) => !user.isFriend);
     console.log("Formatted search results:", formatted);
     setSearchResults(formatted);
   };
@@ -317,6 +457,8 @@ export default function ProfileScreen() {
         console.log("Friend request already exists");
         await loadSentRequests();
         setSearchResults((prev) => prev.map((user) => user.id === addresseeId ? { ...user, isPending: true } : user));
+        setFriendSuggestions((prev) => prev.map((user) => user.id === addresseeId ? { ...user, isPending: true } : user));
+        setPreviewUser((prev: any | null) => prev?.id === addresseeId ? { ...prev, isPending: true } : prev);
         return;
       }
       return console.error("Error sending friend request:", error);
@@ -324,86 +466,101 @@ export default function ProfileScreen() {
     console.log("Friend request sent successfully");
     await loadSentRequests();
     setSearchResults((prev) => prev.map((user) => user.id === addresseeId ? { ...user, isPending: true } : user));
+    setFriendSuggestions((prev) => prev.map((user) => user.id === addresseeId ? { ...user, isPending: true } : user));
+    setPreviewUser((prev: any | null) => prev?.id === addresseeId ? { ...prev, isPending: true } : prev);
   };
 
-  const handleAcceptRequest = async (requestId: string) => {
-    const { data: request, error: fetchError } = await supabase.from("friend_requests").select("*").eq("id", requestId).single();
-    if (fetchError) return console.error("Error fetching request:", fetchError);
-    const requesterId = request.requester_id;
-    const addresseeId = request.addressee_id;
-    const { error: updateError } = await supabase.from("friend_requests").update({ status: "accepted" }).eq("id", requestId);
-    if (updateError) return console.error("Error accepting request:", updateError);
-    const { error: friendError } = await supabase.from("friends").insert([
-      { user_id: requesterId, friend_id: addresseeId },
-      { user_id: addresseeId, friend_id: requesterId },
-    ]);
-    if (friendError) return console.error("Error adding friendship:", friendError);
-    console.log("Friend request accepted");
-    await loadPendingRequests();
-    await loadFriends();
+  const removeFriend = async (friend: any) => {
+    const friendId = friend?.id;
+    if (!friendId) return;
+
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError) {
+      console.error("Session error:", sessionError);
+      Alert.alert("Could not remove friend", "Please try again in a moment.");
+      return;
+    }
+
+    const currentUserId = session?.user?.id;
+    if (!currentUserId) return;
+
+    setRemovingFriendId(friendId);
+
+    const { error: rpcError } = await supabase.rpc("remove_friendship", {
+      target_friend_id: friendId,
+    });
+
+    const missingRpc =
+      rpcError &&
+      (rpcError.code === "PGRST202" ||
+        rpcError.code === "42883" ||
+        String(rpcError.message ?? "").toLowerCase().includes("function"));
+
+    let myFriendRowError = null;
+    let theirFriendRowError = null;
+    let requestCleanupError = null;
+
+    if (missingRpc) {
+      const myDelete = await supabase
+        .from("friends")
+        .delete()
+        .eq("user_id", currentUserId)
+        .eq("friend_id", friendId);
+
+      const theirDelete = await supabase
+        .from("friends")
+        .delete()
+        .eq("user_id", friendId)
+        .eq("friend_id", currentUserId);
+
+      const requestDelete = await supabase
+        .from("friend_requests")
+        .delete()
+        .or(`and(requester_id.eq.${currentUserId},addressee_id.eq.${friendId}),and(requester_id.eq.${friendId},addressee_id.eq.${currentUserId})`);
+
+      myFriendRowError = myDelete.error;
+      theirFriendRowError = theirDelete.error;
+      requestCleanupError = requestDelete.error;
+    }
+
+    setRemovingFriendId(null);
+
+    if (rpcError && !missingRpc) {
+      console.error("Error removing friendship:", rpcError);
+      Alert.alert("Could not remove friend", "The friendship could not be removed. Please try again.");
+      return;
+    }
+
+    if (myFriendRowError) {
+      console.error("Error removing friendship:", myFriendRowError);
+      Alert.alert("Could not remove friend", "The friendship could not be removed. Please try again.");
+      return;
+    }
+
+    if (theirFriendRowError) {
+      console.log("Friend removed from your list, but the other side needs the Supabase remove_friendship function:", theirFriendRowError);
+    }
+
+    if (requestCleanupError) {
+      console.log("Friend removed, but old request cleanup failed:", requestCleanupError);
+    }
+
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setFriends((prev) => prev.filter((item) => item.id !== friendId));
+    setSearchResults((prev) => prev.map((user) => user.id === friendId ? { ...user, isFriend: false, isPending: false } : user));
+    if (previewUser?.id === friendId) closeProfilePreview();
+    await Promise.all([loadFriends(), loadSentRequests(), loadFriendSuggestions()]);
   };
 
-  const handleAcceptMoneyRequest = async (requestId: string) => {
-  const { data: request, error: fetchError } = await supabase
-    .from("money_requests")
-    .select("*")
-    .eq("id", requestId)
-    .single();
-
-  if (fetchError) return console.error("Error fetching money request:", fetchError);
-
-  const { split_id, requester_id, amount } = request;
-
-  const { data: memberRow, error: memberError } = await supabase
-    .from("split_members")
-    .select("id, share_amount")
-    .eq("split_id", split_id)
-    .eq("profile_id", requester_id)
-    .single();
-
-  if (memberError) return console.error("Error finding split member:", memberError);
-
-  let newAmount = Number(memberRow.share_amount ?? 0) + Number(amount);
-
-  if (newAmount > 0) newAmount = 0;
-
-  const { error: updateMemberError } = await supabase
-    .from("split_members")
-    .update({ share_amount: newAmount })
-    .eq("id", memberRow.id);
-
-  if (updateMemberError) return console.error("Error updating balance:", updateMemberError);
-
-  const { error: updateRequestError } = await supabase
-    .from("money_requests")
-    .update({ status: "accepted" })
-    .eq("id", requestId);
-
-  if (updateRequestError) return console.error("Error updating request:", updateRequestError);
-
-  console.log("Money request accepted");
-
-  await loadMoneyRequests();
-  await loadBalances();
-};
-
-const handleDeclineMoneyRequest = async (requestId: string) => {
-  const { error } = await supabase
-    .from("money_requests")
-    .update({ status: "declined" })
-    .eq("id", requestId);
-
-  if (error) return console.error("Error declining request:", error);
-
-  console.log("Money request declined");
-  await loadMoneyRequests();
-};
-
-  const handleDeclineRequest = async (requestId: string) => {
-    const { error } = await supabase.from("friend_requests").update({ status: "declined" }).eq("id", requestId);
-    if (error) return console.error("Error declining request:", error);
-    console.log("Friend request declined");
-    await loadPendingRequests();
+  const confirmRemoveFriend = (friend: any) => {
+    Alert.alert(
+      "Remove friend?",
+      `Remove ${friend.name || `@${friend.username}` || "this friend"} from your friends list?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Remove", style: "destructive", onPress: () => removeFriend(friend) },
+      ]
+    );
   };
 
   const scrollToFriendsSection = () => {
@@ -430,52 +587,14 @@ const handleDeclineMoneyRequest = async (requestId: string) => {
     setFriendsExpanded((prev) => !prev);
   };
 
-  const loadMoneyRequests = async () => {
-  const { data: { session } } = await supabase.auth.getSession();
-  const currentUserId = session?.user?.id;
-  if (!currentUserId) return;
-
-  const { data, error } = await supabase
-    .from("money_requests")
-    .select(`
-      id,
-      split_id,
-      requester_id,
-      amount,
-      status,
-      requester:profiles!requester_id (
-        full_name,
-        username
-      )
-    `)
-    .eq("owner_id", currentUserId)
-    .eq("status", "pending");
-
-  if (error) {
-    console.error("Error loading money requests:", error);
-    return;
-  }
-
-  setMoneyRequests(
-    data?.map((request: any) => ({
-      id: request.id,
-      splitId: request.split_id,
-      requesterId: request.requester_id,
-      amount: Number(request.amount),
-      name: request.requester?.full_name || "Unknown User",
-      username: request.requester?.username || "unknown",
-    })) ?? []
-  );
-};
   const refreshProfile = async () => {
     setRefreshing(true);
     try {
       await Promise.all([
         loadProfile(),
-        loadPendingRequests(),
-        loadMoneyRequests(),
         loadSentRequests(),
         loadFriends(),
+        loadFriendSuggestions(),
         loadBalances(),
       ]);
     } finally {
@@ -488,16 +607,26 @@ const handleDeclineMoneyRequest = async (requestId: string) => {
   };
 
   const profileInitial = profile.name ? profile.name.charAt(0).toUpperCase() : "?";
+  const discoverUsers = searchText.trim() ? searchResults : friendSuggestions;
+  const discoverBadge = searchText.trim() ? `${searchResults.length} found` : `${friendSuggestions.length} people`;
+  const discoverMeta = searchText.trim()
+    ? `Results found: ${searchResults.length}`
+    : "People you may know";
 
   return (
-    <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
     <SafeAreaView edges={["top", "left", "right"]} style={styles.safeArea}>
-      <FloatingOrb style={styles.orb1} />
-      <FloatingOrb style={styles.orb2} />
+      <AppBackground />
+      {backgroundMode === "default" ? (
+        <>
+          <FloatingOrb style={styles.orb1} />
+          <FloatingOrb style={styles.orb2} />
+        </>
+      ) : null}
       <ScrollView
         ref={scrollRef}
         contentContainerStyle={styles.container}
         showsVerticalScrollIndicator={false}
+        onScrollBeginDrag={Keyboard.dismiss}
         keyboardShouldPersistTaps="never"
         keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
         refreshControl={
@@ -511,7 +640,7 @@ const handleDeclineMoneyRequest = async (requestId: string) => {
       >
         <Animated.View style={[styles.header, headerAnim]}>
           <View style={styles.headerLeft}>
-            <View style={styles.sparkleWrap}><Sparkles size={18} color={C.accent} /></View>
+            <View style={styles.sparkleWrap}><UserRound size={18} color={C.accent} /></View>
             <View>
               <Text style={styles.headerEyebrow}>Account</Text>
               <Text style={styles.headerTitle}>Profile</Text>
@@ -529,11 +658,28 @@ const handleDeclineMoneyRequest = async (requestId: string) => {
           <View style={styles.heroGlow} />
           <View style={styles.profileHeader}>
             <View style={styles.avatarHalo}>
-              <View style={styles.avatar}><Text style={styles.avatarText}>{profileInitial}</Text></View>
+              <View style={styles.avatar}>
+                {profile.avatarUrl ? (
+                  <Image
+                    source={{ uri: profile.avatarUrl }}
+                    style={styles.avatarImage}
+                    resizeMode="cover"
+                    onError={(event) => console.log("Profile image failed to load:", event.nativeEvent.error)}
+                  />
+                ) : (
+                  <Text style={styles.avatarText}>{profileInitial}</Text>
+                )}
+              </View>
+              <AvatarDecoration decorationId={profile.avatarDecoration} size={84} />
             </View>
             <View style={styles.profileInfo}>
               <Text style={styles.name}>{profile.name || " "}</Text>
-              <Text style={styles.username}>@{profile.username || ""}</Text>
+              <View style={styles.profileMetaRow}>
+                <Text style={styles.username}>@{profile.username || ""}</Text>
+                {profile.pronouns ? (
+                  <Text style={styles.pronounsInline}>{profile.pronouns}</Text>
+                ) : null}
+              </View>
               <Text style={styles.email}>{profile.email || " "}</Text>
             </View>
           </View>
@@ -567,7 +713,7 @@ const handleDeclineMoneyRequest = async (requestId: string) => {
         </Animated.View>
 
         <Animated.View style={[styles.glassCard, searchAnim]}>
-          <SectionHeader eyebrow="Discover" title="Add New Friend" badge={`${searchResults.length} found`} styles={styles} />
+          <SectionHeader eyebrow="Discover" title="Add New Friend" badge={discoverBadge} styles={styles} />
           <View style={styles.searchBox}>
             <Search size={18} color={C.textSecondary} style={styles.searchIcon} />
             <TextInput
@@ -589,101 +735,44 @@ const handleDeclineMoneyRequest = async (requestId: string) => {
               <Text style={styles.searchButtonText}>Search</Text>
             </Pressable>
           </View>
-          <Text style={styles.sectionMeta}>Results found: {searchResults.length}</Text>
+          <Text style={styles.sectionMeta}>{discoverMeta}</Text>
           {searchText.trim() !== "" && searchResults.length === 0 ? (
             <View style={styles.emptyState}>
               <Text style={styles.emptyTitle}>No users found</Text>
               <Text style={styles.emptySubtitle}>Try another username and search again.</Text>
             </View>
-          ) : searchResults.map((user) => (
-            <View key={user.id} style={styles.resultCard}>
-              <View style={styles.resultAvatar}><Text style={styles.resultAvatarText}>{user.name ? user.name.charAt(0).toUpperCase() : "?"}</Text></View>
+          ) : discoverUsers.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyTitle}>No suggestions yet</Text>
+              <Text style={styles.emptySubtitle}>Search a username to find someone specific.</Text>
+            </View>
+          ) : discoverUsers.map((user) => (
+            <Pressable key={user.id} style={styles.resultCard} onPress={() => openProfilePreview(user)}>
+              <View style={styles.resultAvatar}>
+                {user.avatarUrl ? (
+                  <Image source={{ uri: user.avatarUrl }} style={styles.listAvatarImage} resizeMode="cover" />
+                ) : (
+                  <UserRound size={20} color={C.accentBright} />
+                )}
+              </View>
               <View style={styles.resultBody}>
                 <Text style={styles.resultName}>{user.name}</Text>
                 <Text style={styles.resultUsername}>@{user.username}</Text>
                 <Text style={styles.resultMutual}>{user.mutualFriends} mutual friends</Text>
               </View>
-              <Pressable style={[styles.addButton, user.isPending && styles.pendingButton]} onPress={() => !user.isPending && handleAddFriend(user.id)} disabled={user.isPending}>
+              <Pressable
+                style={[styles.addButton, user.isPending && styles.pendingButton]}
+                onPress={(event) => {
+                  event.stopPropagation();
+                  if (!user.isPending) handleAddFriend(user.id);
+                }}
+                disabled={user.isPending}
+              >
                 {user.isPending ? <Text style={styles.addButtonText}>Pending</Text> : <><UserPlus size={15} color="#fff" /><Text style={styles.addButtonText}>Add</Text></>}
               </Pressable>
-            </View>
+            </Pressable>
           ))}
         </Animated.View>
-
-      <Animated.View style={[styles.glassCard, pendingAnim]}>
-  <SectionHeader
-    eyebrow="Inbox"
-    title="Friend Requests"
-    badge={`${pendingRequests.length}`}
-    styles={styles}
-  />
-          {pendingRequests.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyTitle}>No pending requests</Text>
-              <Text style={styles.emptySubtitle}>New friend requests will show up here.</Text>
-            </View>
-          ) : pendingRequests.map((request) => (
-            <View key={request.id} style={styles.pendingCard}>
-              <View style={styles.pendingInfo}>
-                <View style={styles.pendingAvatar}><Text style={styles.pendingAvatarText}>{request.name ? request.name.charAt(0).toUpperCase() : "?"}</Text></View>
-                <View>
-                  <Text style={styles.resultName}>{request.name}</Text>
-                  <Text style={styles.resultUsername}>@{request.username}</Text>
-                </View>
-              </View>
-              <View style={styles.requestActions}>
-                <Pressable style={styles.acceptButton} onPress={() => handleAcceptRequest(request.id)}><Text style={styles.requestButtonText}>Accept</Text></Pressable>
-                <Pressable style={styles.declineButton} onPress={() => handleDeclineRequest(request.id)}><Text style={styles.requestButtonText}>Decline</Text></Pressable>
-              </View>
-            </View>
-          ))}
-        </Animated.View>
-
-      <Animated.View style={[styles.glassCard, pendingAnim]}>
-  <SectionHeader
-  eyebrow="Inbox"
-  title="Money Requests"
-  badge={`${moneyRequests.length}`}
-  styles={styles}
-/>
-  {moneyRequests.length === 0 ? (
-    <View style={styles.emptyState}>
-      <Text style={styles.emptyTitle}>No pending money requests</Text>
-      <Text style={styles.emptySubtitle}>Money payoff requests will show up here.</Text>
-    </View>
-  ) : moneyRequests.map((request) => (
-    <View key={request.id} style={styles.pendingCard}>
-      <View style={styles.pendingInfo}>
-        <View style={styles.pendingAvatar}>
-          <Text style={styles.pendingAvatarText}>
-            {request.name ? request.name.charAt(0).toUpperCase() : "?"}
-          </Text>
-        </View>
-        <View>
-          <Text style={styles.resultName}>{request.name}</Text>
-          <Text style={styles.resultUsername}>@{request.username}</Text>
-          <Text style={styles.resultMutual}>Wants to pay: ${request.amount.toFixed(2)}</Text>
-        </View>
-      </View>
-
-      <View style={styles.requestActions}>
-    <Pressable
-    style={styles.acceptButton}
-    onPress={() => handleAcceptMoneyRequest(request.id)}
-  >
-    <Text style={styles.requestButtonText}>Accept</Text>
-  </Pressable>
-
-  <Pressable
-    style={styles.declineButton}
-    onPress={() => handleDeclineMoneyRequest(request.id)}
-  >
-    <Text style={styles.requestButtonText}>Decline</Text>
-  </Pressable>
-</View>
-    </View>
-  ))}
-</Animated.View>
 
         <Animated.View
           style={[styles.glassCard, friendsAnim]}
@@ -710,19 +799,40 @@ const handleDeclineMoneyRequest = async (requestId: string) => {
           {friendsExpanded ? (
             <View style={styles.friendsAnimatedWrap}>
               {friends.map((friend) => (
-                <View key={friend.id} style={styles.friendCard}>
+                <Pressable key={friend.id} style={styles.friendCard} onPress={() => openProfilePreview(friend)}>
                   <View style={styles.friendInfo}>
-                    <View style={styles.friendAvatar}><Text style={styles.friendAvatarText}>{friend.name ? friend.name.charAt(0).toUpperCase() : "?"}</Text></View>
-                    <View>
-                      <Text style={styles.resultName}>{friend.name}</Text>
-                      <Text style={styles.resultUsername}>@{friend.username}</Text>
+                    <View style={styles.friendAvatar}>
+                      {friend.avatarUrl ? (
+                        <Image source={{ uri: friend.avatarUrl }} style={styles.listAvatarImage} resizeMode="cover" />
+                      ) : (
+                        <UserRound size={20} color={C.accentBright} />
+                      )}
+                    </View>
+                    <View style={styles.friendTextBlock}>
+                      <Text style={styles.resultName} numberOfLines={1}>{friend.name}</Text>
+                      <Text style={styles.resultUsername} numberOfLines={1}>@{friend.username}</Text>
                     </View>
                   </View>
-                  <View style={styles.friendStatus}>
-                    <Check size={15} color={C.green} />
-                    <Text style={styles.friendStatusText}>Friends</Text>
+                  <View style={styles.friendActions}>
+                    <View style={styles.friendStatus}>
+                      <Check size={15} color={C.green} />
+                      <Text style={styles.friendStatusText}>Friends</Text>
+                    </View>
+                    <Pressable
+                      style={[styles.removeFriendButton, removingFriendId === friend.id && styles.removeFriendButtonDisabled]}
+                      onPress={(event) => {
+                        event.stopPropagation();
+                        confirmRemoveFriend(friend);
+                      }}
+                      disabled={removingFriendId === friend.id}
+                    >
+                      <UserMinus size={14} color={C.red} />
+                      <Text style={styles.removeFriendText}>
+                        {removingFriendId === friend.id ? "Removing" : "Remove"}
+                      </Text>
+                    </Pressable>
                   </View>
-                </View>
+                </Pressable>
               ))}
               {friends.length === 0 ? (
                 <View style={styles.emptyState}>
@@ -734,8 +844,95 @@ const handleDeclineMoneyRequest = async (requestId: string) => {
           ) : null}
         </Animated.View>
       </ScrollView>
+      <Modal
+        visible={previewVisible}
+        animationType="none"
+        transparent
+        onRequestClose={closeProfilePreview}
+      >
+        <Animated.View style={[styles.previewOverlay, { opacity: previewAnim }]}>
+          <Pressable style={styles.previewTapAway} onPress={closeProfilePreview} />
+          <Animated.View
+            style={[
+              styles.previewCardMotion,
+              {
+                transform: [
+                  { translateY: previewTranslateY },
+                  { scale: previewScale },
+                ],
+              },
+            ]}
+          >
+            <Pressable style={styles.previewCard} onPress={(event) => event.stopPropagation()}>
+            {previewUser ? (
+              <>
+                <Animated.View
+                  pointerEvents="none"
+                  style={[
+                    styles.previewAccentGlow,
+                    {
+                      opacity: previewAnim,
+                      transform: [{ scale: previewGlowScale }],
+                    },
+                  ]}
+                />
+                <View style={styles.previewHandle} />
+                <View style={styles.previewAvatarFrame}>
+                  <View style={styles.previewAvatarWrap}>
+                    {previewUser.avatarUrl ? (
+                      <Image source={{ uri: previewUser.avatarUrl }} style={styles.previewAvatarImage} resizeMode="cover" />
+                    ) : (
+                      <UserRound size={34} color={C.accentBright} />
+                    )}
+                  </View>
+                  <AvatarDecoration decorationId={previewUser.avatarDecoration} size={112} />
+                </View>
+                <Text style={styles.previewName}>{previewUser.name || "Unknown user"}</Text>
+                <Text style={styles.previewUsername}>@{previewUser.username || "unknown"}</Text>
+                {previewUser.pronouns ? (
+                  <Text style={styles.previewPronouns}>{previewUser.pronouns}</Text>
+                ) : null}
+
+                <View style={styles.previewStats}>
+                  <View style={styles.previewStatCard}>
+                    <Text style={styles.previewStatValue}>{previewUser.mutualFriends ?? 0}</Text>
+                    <Text style={styles.previewStatLabel}>Mutual friends</Text>
+                  </View>
+                  <View style={styles.previewStatCard}>
+                    <Text style={styles.previewStatValue}>
+                      {previewUser.isFriend ? "Yes" : previewUser.isPending ? "Pending" : "No"}
+                    </Text>
+                    <Text style={styles.previewStatLabel}>Friends</Text>
+                  </View>
+                </View>
+
+                <Text style={styles.previewHint}>
+                  {previewUser.isFriend ? "This person is already in your friends list." : "Check their profile before sending a request."}
+                </Text>
+
+                <View style={styles.previewActions}>
+                  <Pressable style={styles.previewCloseButton} onPress={closeProfilePreview}>
+                    <Text style={styles.previewCloseText}>Close</Text>
+                  </Pressable>
+                  {!previewUser.isFriend ? (
+                    <Pressable
+                      style={[styles.previewAddButton, previewUser.isPending && styles.pendingButton]}
+                      onPress={() => !previewUser.isPending && handleAddFriend(previewUser.id)}
+                      disabled={previewUser.isPending}
+                    >
+                      <Text style={styles.previewAddText}>
+                        {previewUser.isPending ? "Pending" : "Add Friend"}
+                      </Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              </>
+            ) : null}
+            </Pressable>
+          </Animated.View>
+        </Animated.View>
+      </Modal>
     </SafeAreaView>
-    </TouchableWithoutFeedback>
   );
 }
 
@@ -756,12 +953,15 @@ const createStyles = (C: ReturnType<typeof useAppTheme>["palette"]) => StyleShee
   heroCard: { backgroundColor: C.cardBright, borderRadius: 26, borderWidth: 1, borderColor: C.borderBright, padding: 20, marginBottom: 14, overflow: "hidden" },
   heroGlow: { position: "absolute", top: 0, left: "12%", right: "12%", height: 1, backgroundColor: C.accent, opacity: 0.25 },
   profileHeader: { flexDirection: "row", alignItems: "center", marginBottom: 18 },
-  avatarHalo: { width: 84, height: 84, borderRadius: 42, justifyContent: "center", alignItems: "center", backgroundColor: C.accentDim, borderWidth: 1, borderColor: `${C.accent}33`, marginRight: 16 },
-  avatar: { width: 68, height: 68, borderRadius: 34, backgroundColor: C.accentDeep, justifyContent: "center", alignItems: "center" },
+  avatarHalo: { width: 84, height: 84, borderRadius: 42, justifyContent: "center", alignItems: "center", backgroundColor: C.accentDim, borderWidth: 1, borderColor: `${C.accent}33`, marginRight: 16, position: "relative" },
+  avatar: { width: 68, height: 68, borderRadius: 34, backgroundColor: C.accentDeep, justifyContent: "center", alignItems: "center", overflow: "hidden" },
+  avatarImage: { width: "100%", height: "100%" },
   avatarText: { color: "#fff", fontSize: 28, fontWeight: "800" },
   profileInfo: { flex: 1 },
   name: { fontSize: 23, fontWeight: "800", color: C.textPrimary, letterSpacing: -0.5 },
-  username: { fontSize: 14, color: C.accentBright, fontWeight: "600", marginTop: 4 },
+  profileMetaRow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 7, marginTop: 4 },
+  username: { fontSize: 14, color: C.accentBright, fontWeight: "600" },
+  pronounsInline: { fontSize: 14, color: C.textSecondary, fontWeight: "600" },
   email: { fontSize: 13, color: C.textSecondary, marginTop: 4 },
   statsRow: { flexDirection: "row", gap: 10 },
   metricSlot: { flex: 1 },
@@ -811,7 +1011,8 @@ const createStyles = (C: ReturnType<typeof useAppTheme>["palette"]) => StyleShee
   searchButton: { backgroundColor: C.accent, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 11, marginLeft: 8, shadowColor: C.accent, shadowOpacity: 0.35, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 4 },
   searchButtonText: { color: "#fff", fontSize: 13, fontWeight: "800" },
   resultCard: { flexDirection: "row", alignItems: "center", backgroundColor: C.surface, borderRadius: 16, borderWidth: 1, borderColor: C.border, padding: 12, marginBottom: 10 },
-  resultAvatar: { width: 42, height: 42, borderRadius: 21, backgroundColor: C.accentDim, borderWidth: 1, borderColor: `${C.accent}33`, justifyContent: "center", alignItems: "center", marginRight: 12 },
+  resultAvatar: { width: 42, height: 42, borderRadius: 21, backgroundColor: C.accentDim, borderWidth: 1, borderColor: `${C.accent}33`, justifyContent: "center", alignItems: "center", marginRight: 12, overflow: "hidden" },
+  listAvatarImage: { width: "100%", height: "100%" },
   resultAvatarText: { color: C.accentBright, fontWeight: "700", fontSize: 15 },
   resultBody: { flex: 1 },
   resultName: { fontSize: 14, fontWeight: "700", color: C.textPrimary },
@@ -828,7 +1029,7 @@ const createStyles = (C: ReturnType<typeof useAppTheme>["palette"]) => StyleShee
   acceptButton: { flex: 1, alignItems: "center", backgroundColor: C.green, borderRadius: 12, paddingVertical: 10 },
   declineButton: { flex: 1, alignItems: "center", backgroundColor: C.red, borderRadius: 12, paddingVertical: 10 },
   requestButtonText: { color: "#fff", fontSize: 12, fontWeight: "800" },
-  friendCard: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: C.surface, borderRadius: 16, borderWidth: 1, borderColor: C.border, padding: 12, marginBottom: 10 },
+  friendCard: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: C.surface, borderRadius: 16, borderWidth: 1, borderColor: C.border, padding: 12, marginBottom: 10, gap: 10 },
   friendsSectionTop: { marginBottom: 6 },
   collapseToggle: {
     alignSelf: "flex-start",
@@ -851,11 +1052,177 @@ const createStyles = (C: ReturnType<typeof useAppTheme>["palette"]) => StyleShee
   friendsAnimatedWrap: {
     paddingTop: 2,
   },
-  friendInfo: { flexDirection: "row", alignItems: "center" },
-  friendAvatar: { width: 42, height: 42, borderRadius: 21, backgroundColor: "#4f46e522", borderWidth: 1, borderColor: "#4f46e555", justifyContent: "center", alignItems: "center", marginRight: 12 },
-  friendAvatarText: { color: "#a5b4fc", fontSize: 15, fontWeight: "700" },
+  friendInfo: { flexDirection: "row", alignItems: "center", flex: 1, minWidth: 0 },
+  friendAvatar: { width: 42, height: 42, borderRadius: 21, backgroundColor: C.accentDim, borderWidth: 1, borderColor: `${C.accent}55`, justifyContent: "center", alignItems: "center", marginRight: 12, overflow: "hidden" },
+  friendAvatarText: { color: C.accentBright, fontSize: 15, fontWeight: "700" },
+  friendTextBlock: { flex: 1, minWidth: 0 },
+  friendActions: { alignItems: "flex-end", gap: 7 },
   friendStatus: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: C.greenDim, borderRadius: 999, borderWidth: 1, borderColor: `${C.green}33`, paddingHorizontal: 10, paddingVertical: 6 },
   friendStatusText: { color: C.green, fontSize: 11, fontWeight: "800" },
+  removeFriendButton: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: C.redDim, borderRadius: 999, borderWidth: 1, borderColor: `${C.red}33`, paddingHorizontal: 10, paddingVertical: 7 },
+  removeFriendButtonDisabled: { opacity: 0.55 },
+  removeFriendText: { color: C.red, fontSize: 11, fontWeight: "800" },
+  previewOverlay: {
+    flex: 1,
+    justifyContent: "center",
+    padding: 18,
+    backgroundColor: C.mode === "dark" ? "rgba(6, 10, 18, 0.78)" : "rgba(15, 23, 42, 0.38)",
+  },
+  previewTapAway: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  previewCardMotion: {
+    width: "100%",
+  },
+  previewCard: {
+    alignItems: "center",
+    backgroundColor: C.cardBright,
+    borderRadius: 26,
+    borderWidth: 1,
+    borderColor: C.borderBright,
+    padding: 20,
+    shadowColor: "#000",
+    shadowOpacity: C.mode === "dark" ? 0.34 : 0.16,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 14 },
+    elevation: 10,
+    overflow: "hidden",
+  },
+  previewAccentGlow: {
+    position: "absolute",
+    top: -46,
+    width: 170,
+    height: 120,
+    borderRadius: 85,
+    backgroundColor: C.accentDim,
+  },
+  previewHandle: {
+    width: 42,
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: C.borderBright,
+    marginBottom: 16,
+  },
+  previewAvatarFrame: {
+    width: 112,
+    height: 112,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 14,
+    position: "relative",
+  },
+  previewAvatarWrap: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    justifyContent: "center",
+    alignItems: "center",
+    overflow: "hidden",
+    backgroundColor: C.accentDim,
+    borderWidth: 1,
+    borderColor: `${C.accent}55`,
+  },
+  previewAvatarImage: {
+    width: "100%",
+    height: "100%",
+  },
+  previewName: {
+    color: C.textPrimary,
+    fontSize: 23,
+    fontWeight: "800",
+    textAlign: "center",
+    letterSpacing: -0.4,
+  },
+  previewUsername: {
+    color: C.accentBright,
+    fontSize: 14,
+    fontWeight: "700",
+    marginTop: 4,
+    textAlign: "center",
+  },
+  previewPronouns: {
+    color: C.textSecondary,
+    fontSize: 13,
+    fontWeight: "700",
+    marginTop: 7,
+    textAlign: "center",
+  },
+  previewStats: {
+    width: "100%",
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 18,
+  },
+  previewStatCard: {
+    flex: 1,
+    minHeight: 76,
+    justifyContent: "center",
+    alignItems: "center",
+    borderRadius: 18,
+    backgroundColor: C.surface,
+    borderWidth: 1,
+    borderColor: C.border,
+    paddingHorizontal: 10,
+  },
+  previewStatValue: {
+    color: C.textPrimary,
+    fontSize: 18,
+    fontWeight: "800",
+    textAlign: "center",
+  },
+  previewStatLabel: {
+    color: C.textSecondary,
+    fontSize: 11,
+    fontWeight: "700",
+    marginTop: 5,
+    textAlign: "center",
+  },
+  previewHint: {
+    color: C.textSecondary,
+    fontSize: 12,
+    lineHeight: 18,
+    textAlign: "center",
+    marginTop: 16,
+  },
+  previewActions: {
+    width: "100%",
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 18,
+  },
+  previewCloseButton: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.surface,
+    paddingVertical: 12,
+  },
+  previewCloseText: {
+    color: C.textPrimary,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  previewAddButton: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 14,
+    backgroundColor: C.accent,
+    paddingVertical: 12,
+    shadowColor: C.accent,
+    shadowOpacity: 0.28,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 4,
+  },
+  previewAddText: {
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "800",
+  },
   emptyState: { backgroundColor: C.surface, borderRadius: 16, borderWidth: 1, borderColor: C.border, paddingVertical: 22, paddingHorizontal: 16, alignItems: "center" },
   emptyTitle: { fontSize: 14, fontWeight: "700", color: C.textPrimary, textAlign: "center" },
   emptySubtitle: { fontSize: 12, color: C.textSecondary, textAlign: "center", marginTop: 6, lineHeight: 18 },
